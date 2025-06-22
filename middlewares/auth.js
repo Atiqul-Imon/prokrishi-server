@@ -21,11 +21,11 @@ export const authenticate = async (req, res, next) => {
     }
 
     // Verify token
-    const decoded = jwt.verify(token, process.env.SECRET_KEY_ACCESS_TOKEN);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     // Find user by ID, exclude sensitive fields
     const user = await User.findById(decoded.id)
-      .select("-password -addresses")
+      .select("-password")
       .lean();
 
     if (!user) {

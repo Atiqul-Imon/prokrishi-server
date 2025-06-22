@@ -7,6 +7,7 @@ const addressSchema = new mongoose.Schema({
   division: { type: String, required: true },
   district: { type: String, required: true },
   upazila: { type: String, required: true },
+  postalCode: { type: String, required: true },
   address: { type: String, required: true },      // Street address etc.
 });
 
@@ -29,16 +30,20 @@ const userSchema = new mongoose.Schema(
       required: true,
       minlength: 6,
     },
-  role: {
-  type: String,
-  enum: ["user", "admin", "super_admin"],
-  default: "user",
-},
+    role: {
+      type: String,
+      enum: ["user", "admin", "super_admin"],
+      default: "user",
+    },
     isVerified: {
       type: Boolean,
       default: false,
     },
     addresses: [addressSchema],  // <-- Array of addresses
+    resetPasswordToken: String,
+    resetPasswordExpires: Date,
+    phoneOtp: String,
+    phoneOtpExpires: Date,
   },
   {
     timestamps: true,

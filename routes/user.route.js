@@ -1,17 +1,47 @@
-import { Router } from "express";
+import express from "express";
+const router = express.Router();
 import {
-  getUserProfile,
-  loginUser,
   registerUser,
-  updateUserProfileAddresses,
+  loginUser,
+  getUserProfile,
+  updateUserProfile,
+  addAddress,
+  updateAddress,
+  deleteAddress,
+  getAllUsers,
+  getUserById,
+  updateUserRole,
+  forgotPassword,
+  resetPasswordWithToken,
+  resetPasswordWithOTP,
 } from "../controllers/user.controller.js";
-import { authenticate } from "../middlewares/auth.js";
+import { authenticate, authorizeAdmin } from "../middlewares/auth.js";
 
-const userRouter = Router();
+// Public routes
+router.post("/register", registerUser);
+router.post("/login", loginUser);
+router.post('/forgot-password', forgotPassword);
+router.post('/reset-password-email/:token', resetPasswordWithToken);
+router.post('/reset-password-phone', resetPasswordWithOTP);
 
-userRouter.post("/register", registerUser);
-userRouter.post("/login", loginUser);
-userRouter.get("/profile", authenticate, getUserProfile);
-userRouter.put("/profile", authenticate, updateUserProfileAddresses); 
+// Private routes (require authentication)
+router.route("/profile").get(authenticate, getUserProfile).put(authenticate, updateUserProfile);
 
-export default userRouter;
+router.route("/profile/addresses")
+    .post(authenticate, addAddress);
+
+router.route("/profile/addresses/:addressId")
+    .put(authenticate, updateAddress)
+    .delete(authenticate, deleteAddress);
+
+// Admin routes
+router.route("/")
+    .get(authenticate, authorizeAdmin, getAllUsers);
+
+router.route("/:id")
+    .get(authenticate, authorizeAdmin, getUserById);
+
+router.route("/:id/role")
+    .patch(authenticate, authorizeAdmin, updateUserRole);
+
+export default router;

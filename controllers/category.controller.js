@@ -1,10 +1,33 @@
 import Category from "../models/category.model.js";
 import slugify from "slugify";
+import { v2 as cloudinary } from "cloudinary";
+
+// Cloudinary config
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+  secure: true,
+});
+
+// Helper: Upload to Cloudinary from buffer
+const uploadToCloudinary = (fileBuffer) => {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder: "prokrishi_categories" },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result);
+      }
+    );
+    stream.end(fileBuffer);
+  });
+};
 
 // Create Category
 export const createCategory = async (req, res) => {
   try {
-    const { name, description } = req.body;
+    const { name, description, isFeatured } = req.body;
 
     const exists = await Category.findOne({ name: name.toLowerCase() });
     if (exists) {
@@ -15,10 +38,22 @@ export const createCategory = async (req, res) => {
       });
     }
 
+    let image_url = null;
+    let cloudinary_id = null;
+
+    if (req.file) {
+      const result = await uploadToCloudinary(req.file.buffer);
+      image_url = result.secure_url;
+      cloudinary_id = result.public_id;
+    }
+
     const category = await Category.create({
       name: name.toLowerCase(),
       slug: slugify(name),
       description,
+      image: image_url,
+      isFeatured: isFeatured || false,
+      cloudinary_id,
     });
 
     res.status(201).json({
@@ -49,6 +84,28 @@ export const getCategories = async (req, res) => {
   }
 };
 
+// Get Single Category by ID
+export const getCategoryById = async (req, res) => {
+    try {
+        const category = await Category.findById(req.params.id);
+
+        if (!category) {
+            return res.status(404).json({
+                message: "Category not found",
+                success: false,
+            });
+        }
+
+        res.status(200).json({ success: true, category });
+    } catch (error) {
+        res.status(500).json({
+            message: "Error fetching category",
+            error: error.message,
+            success: false,
+        });
+    }
+};
+
 // Get Single Category by Slug
 export const getCategoryBySlug = async (req, res) => {
   try {
@@ -74,14 +131,37 @@ export const getCategoryBySlug = async (req, res) => {
 // Update Category
 export const updateCategory = async (req, res) => {
   try {
-    const { name, description } = req.body;
+    const { name, description, isFeatured } = req.body;
+    const category = await Category.findById(req.params.id);
+
+    if (!category) {
+      return res.status(404).json({ message: "Category not found", success: false });
+    }
+
+    // Handle image update
+    let image_url = category.image;
+    let cloudinary_id = category.cloudinary_id;
+
+    if (req.file) {
+      // Delete old image from Cloudinary
+      if (category.cloudinary_id) {
+        await cloudinary.uploader.destroy(category.cloudinary_id);
+      }
+      // Upload new image
+      const result = await uploadToCloudinary(req.file.buffer);
+      image_url = result.secure_url;
+      cloudinary_id = result.public_id;
+    }
 
     const updated = await Category.findByIdAndUpdate(
       req.params.id,
       {
-        name: name?.toLowerCase(),
-        slug: slugify(name),
+        name: name ? name.toLowerCase() : category.name,
+        slug: name ? slugify(name) : category.slug,
         description,
+        isFeatured,
+        image: image_url,
+        cloudinary_id,
       },
       { new: true }
     );
@@ -99,7 +179,19 @@ export const updateCategory = async (req, res) => {
 // Delete Category
 export const deleteCategory = async (req, res) => {
   try {
+    const category = await Category.findById(req.params.id);
+
+    if (!category) {
+        return res.status(404).json({ message: "Category not found", success: false });
+    }
+
+    // Delete image from cloudinary
+    if (category.cloudinary_id) {
+        await cloudinary.uploader.destroy(category.cloudinary_id);
+    }
+    
     await Category.findByIdAndDelete(req.params.id);
+
     res.status(200).json({
       message: "Category deleted successfully",
       success: true,
@@ -111,4 +203,20 @@ export const deleteCategory = async (req, res) => {
       success: false,
     });
   }
+};
+
+// @desc    Get featured categories
+// @route   GET /api/category/featured
+// @access  Public
+export const getFeaturedCategories = async (req, res) => {
+    try {
+        const categories = await Category.find({ isFeatured: true }).limit(8);
+        res.status(200).json({
+            message: "Featured categories fetched successfully",
+            success: true,
+            categories,
+        });
+    } catch (error) {
+        res.status(500).json({ message: 'Server error', success: false, error: true });
+    }
 };

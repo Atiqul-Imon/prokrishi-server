@@ -18,6 +18,17 @@ const categorySchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    image: {
+      type: String,
+      default: null,
+    },
+    isFeatured: {
+      type: Boolean,
+      default: false,
+    },
+    cloudinary_id: {
+      type: String,
+    },
   },
   {
     timestamps: true,
