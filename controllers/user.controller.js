@@ -11,18 +11,44 @@ export const registerUser = async (req, res) => {
   try {
     const { name, email, phone, password } = req.body;
 
-    // Check if user already exists
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
+    // Validate required fields
+    if (!phone || !name || !password) {
       return res.status(400).json({
-        message: "User already exists with this email",
+        message: "Name, phone number, and password are required",
         error: true,
         success: false,
       });
     }
 
-    // Create new user
-    const newUser = await User.create({ name, email, phone, password });
+    // Check if phone already exists (phone is now the primary unique identifier)
+    const existingPhone = await User.findOne({ phone });
+    if (existingPhone) {
+      return res.status(400).json({
+        message: "User already exists with this phone number",
+        error: true,
+        success: false,
+      });
+    }
+
+    // Check if email already exists (if email is provided)
+    if (email) {
+      const existingEmail = await User.findOne({ email });
+      if (existingEmail) {
+        return res.status(400).json({
+          message: "User already exists with this email",
+          error: true,
+          success: false,
+        });
+      }
+    }
+
+    // Create new user (email can be undefined/null if not provided)
+    const newUser = await User.create({ 
+      name, 
+      email: email || undefined, // Set to undefined if empty
+      phone, 
+      password 
+    });
 
     // Generate tokens
     const accessToken = await generateAccessToken(newUser._id);
@@ -33,7 +59,7 @@ export const registerUser = async (req, res) => {
 
     res.status(201).json({
       message: "User registered successfully",
-      user: userData, // includes .role
+      user: userData,
       accessToken,
       refreshToken,
       success: true,
@@ -41,7 +67,7 @@ export const registerUser = async (req, res) => {
   } catch (error) {
     console.error("Register error:", error.message);
     res.status(500).json({
-      message: "Server error while registering user",
+      message: error.message || "Server error while registering user",
       error: true,
       success: false,
     });
@@ -52,11 +78,25 @@ export const loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Check if user exists
-    const user = await User.findOne({ email });
+    if (!email || !password) {
+      return res.status(400).json({
+        message: "Email/Phone and password are required",
+        error: true,
+        success: false,
+      });
+    }
+
+    // Find user by email OR phone (support both login methods)
+    const user = await User.findOne({
+      $or: [
+        { email: email },
+        { phone: email } // Allow login with phone in email field
+      ]
+    });
+
     if (!user) {
       return res.status(401).json({
-        message: "Invalid email or password",
+        message: "Invalid credentials",
         error: true,
         success: false,
       });
@@ -66,7 +106,7 @@ export const loginUser = async (req, res) => {
     const isMatch = await user.matchPassword(password);
     if (!isMatch) {
       return res.status(401).json({
-        message: "Invalid email or password",
+        message: "Invalid credentials",
         error: true,
         success: false,
       });
@@ -81,7 +121,7 @@ export const loginUser = async (req, res) => {
 
     res.status(200).json({
       message: "Login successful",
-      user: userData, // includes .role
+      user: userData,
       accessToken,
       refreshToken,
       success: true,

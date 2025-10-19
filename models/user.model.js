@@ -20,11 +20,17 @@ const userSchema = new mongoose.Schema(
     },
     email: {
       type: String,
-      required: true,
+      required: false, // Email is now OPTIONAL
       unique: true,
+      sparse: true, // Allows multiple null values for unique constraint
       lowercase: true,
     },
-    phone: { type: String }, // Optional user phone
+    phone: { 
+      type: String,
+      required: true, // Phone is now REQUIRED
+      unique: true, // Phone must be unique
+      trim: true,
+    },
     password: {
       type: String,
       required: true,

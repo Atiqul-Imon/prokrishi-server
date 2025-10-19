@@ -28,8 +28,17 @@ export const createIndexes = async () => {
     await Category.collection.createIndex({ createdAt: -1 });
     console.log('✅ Category indexes created');
 
-    // User indexes
-    await User.collection.createIndex({ email: 1 }, { unique: true });
+    // User indexes - Drop and recreate email index with sparse option
+    try {
+      await User.collection.dropIndex('email_1');
+      console.log('🔄 Dropped old email index');
+    } catch (err) {
+      // Index might not exist, that's okay
+      console.log('ℹ️ Email index does not exist, creating new one');
+    }
+    
+    await User.collection.createIndex({ email: 1 }, { unique: true, sparse: true }); // Sparse allows null values
+    await User.collection.createIndex({ phone: 1 }, { unique: true }); // Phone is required and unique
     await User.collection.createIndex({ role: 1 });
     await User.collection.createIndex({ isVerified: 1 });
     await User.collection.createIndex({ createdAt: -1 });
