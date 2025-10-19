@@ -1,30 +1,26 @@
 import express from 'express';
 import { authenticate } from '../middlewares/auth.js';
 import {
+  processCODPayment,
+  confirmCODPayment,
+  getPaymentStatus,
+  getCODPaymentInstructions,
   createPaymentSession,
-  mockPaymentSuccess,
-  mockPaymentFail,
   paymentSuccess,
-  paymentFail,
-  paymentCancel,
-  paymentIPN,
-  getPaymentStatus
+  paymentFail
 } from '../controllers/payment.controller.js';
 
 const router = express.Router();
 
-// Protected routes (require authentication)
-router.post('/create-session', authenticate, createPaymentSession);
+// COD Payment routes
+router.post('/cod/process', authenticate, processCODPayment);
+router.post('/cod/confirm', authenticate, confirmCODPayment);
+router.get('/cod/instructions', getCODPaymentInstructions);
+
+// Payment status and legacy routes
 router.get('/status/:orderId', authenticate, getPaymentStatus);
-
-// Mock payment routes (for testing)
-router.post('/mock/success', mockPaymentSuccess);
-router.post('/mock/fail', mockPaymentFail);
-
-// Real SSL Commerz routes (for future use)
+router.post('/create-session', authenticate, createPaymentSession);
 router.post('/success', paymentSuccess);
 router.post('/fail', paymentFail);
-router.post('/cancel', paymentCancel);
-router.post('/ipn', paymentIPN);
 
 export default router;

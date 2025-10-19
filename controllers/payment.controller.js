@@ -1,166 +1,78 @@
 import Order from '../models/order.model.js';
+import Product from '../models/product.model.js';
+import User from '../models/user.model.js';
+import logger, { logBusiness } from '../services/logger.js';
 
-// Mock payment system for testing
-// This simulates SSL Commerz behavior without requiring real credentials
+// COD Payment System - Simplified for agricultural e-commerce
 
-// Create payment session (mock)
-export const createPaymentSession = async (req, res) => {
+// Process COD payment (immediate confirmation)
+export const processCODPayment = async (req, res) => {
   try {
-    const { orderId, paymentMethod } = req.body;
+    const { orderId } = req.body;
     const userId = req.user.id;
 
     // Find the order
-    const order = await Order.findOne({ _id: orderId, user: userId }).populate('user');
-    
+    const order = await Order.findOne({ _id: orderId, user: userId })
+      .populate('user')
+      .populate('orderItems.product');
+
     if (!order) {
-      return res.status(404).json({ message: 'Order not found' });
+      return res.status(404).json({ 
+        success: false,
+        message: 'Order not found' 
+      });
     }
 
     if (order.status !== 'pending') {
-      return res.status(400).json({ message: 'Order is not in pending status' });
+      return res.status(400).json({ 
+        success: false,
+        message: 'Order is not in pending status' 
+      });
     }
 
-    // Generate unique transaction ID
-    const tran_id = `MOCK_TXN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    // Generate COD transaction ID
+    const codTransactionId = `COD_${Date.now()}_${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
 
-    // Update order with transaction ID
-    await Order.findByIdAndUpdate(orderId, {
-      transactionId: tran_id,
-      paymentMethod: paymentMethod,
-      paymentStatus: 'pending'
-    });
+    // Update order status for COD
+    const updatedOrder = await Order.findByIdAndUpdate(
+      orderId,
+      {
+        transactionId: codTransactionId,
+        paymentMethod: 'Cash on Delivery',
+        paymentStatus: 'pending', // Will be confirmed when delivered
+        status: 'confirmed', // COD orders are immediately confirmed
+        paymentDetails: {
+          transactionId: codTransactionId,
+          amount: order.totalAmount,
+          currency: 'BDT',
+          paymentDate: new Date(),
+          method: 'COD'
+        }
+      },
+      { new: true }
+    ).populate('user orderItems.product');
 
-    // For mock system, we'll redirect to a mock payment page
-    const mockPaymentUrl = `${process.env.FRONTEND_URL}/mock-payment?tran_id=${tran_id}&amount=${order.totalAmount}&orderId=${orderId}`;
-
-    res.json({
-      success: true,
-      paymentUrl: mockPaymentUrl,
-      transactionId: tran_id,
-      isMock: true // Flag to indicate this is a mock payment
-    });
-  } catch (error) {
-    console.error('Payment session error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
-};
-
-// Mock payment success (simulates SSL Commerz success callback)
-export const mockPaymentSuccess = async (req, res) => {
-  try {
-    const { tran_id, orderId } = req.body;
-
-    // Find order by transaction ID
-    const order = await Order.findOne({ transactionId: tran_id });
-    
-    if (!order) {
-      return res.status(404).json({ message: 'Order not found' });
-    }
-
-    // Simulate payment verification delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Update order status (simulating successful payment)
-    await Order.findByIdAndUpdate(order._id, {
-      status: 'confirmed',
-      paymentStatus: 'completed',
-      paymentDetails: {
-        transactionId: tran_id,
-        validationId: `MOCK_VAL_${Date.now()}`,
-        amount: order.totalAmount,
-        currency: 'BDT',
-        paymentDate: new Date()
-      }
-    });
-
-    res.json({
-      success: true,
-      message: 'Payment successful (Mock)',
+    // Log business event
+    logBusiness('COD_ORDER_CONFIRMED', {
       orderId: order._id,
-      transactionId: tran_id
+      userId: userId,
+      amount: order.totalAmount,
+      transactionId: codTransactionId
     });
-  } catch (error) {
-    console.error('Mock payment success error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
-};
 
-// Mock payment failure (simulates SSL Commerz failure callback)
-export const mockPaymentFail = async (req, res) => {
-  try {
-    const { tran_id, orderId, error = 'Payment failed' } = req.body;
-
-    // Find order by transaction ID
-    const order = await Order.findOne({ transactionId: tran_id });
-    
-    if (order) {
-      // Update order status
-      await Order.findByIdAndUpdate(order._id, {
-        status: 'cancelled',
-        paymentStatus: 'failed',
-        paymentDetails: {
-          transactionId: tran_id,
-          error: error,
-          failedDate: new Date()
-        }
-      });
-    }
-
-    res.json({
-      success: false,
-      message: 'Payment failed (Mock)',
-      error: error
-    });
-  } catch (error) {
-    console.error('Mock payment fail error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
-};
-
-// Payment success callback (for real SSL Commerz - kept for future use)
-export const paymentSuccess = async (req, res) => {
-  try {
-    const { tran_id, val_id, amount, store_amount, currency, status } = req.body;
-
-    // For now, just log the data (will be implemented when real SSL Commerz is available)
-    console.log('Real SSL Commerz success callback:', { tran_id, val_id, amount, currency, status });
-
-    // Find order by transaction ID
-    const order = await Order.findOne({ transactionId: tran_id });
-    
-    if (!order) {
-      return res.status(404).json({ message: 'Order not found' });
-    }
-
-    // Update order status
-    await Order.findByIdAndUpdate(order._id, {
-      status: 'confirmed',
-      paymentStatus: 'completed',
-      paymentDetails: {
-        transactionId: tran_id,
-        validationId: val_id,
-        amount: amount,
-        currency: currency,
-        paymentDate: new Date()
-      }
-    });
+    logger.info(`COD order confirmed: ${orderId} - Amount: ৳${order.totalAmount}`);
 
     res.json({
       success: true,
-      message: 'Payment successful',
-      orderId: order._id
+      message: 'Order confirmed for Cash on Delivery',
+      order: updatedOrder,
+      transactionId: codTransactionId,
+      paymentMethod: 'Cash on Delivery',
+      status: 'confirmed'
     });
+
   } catch (error) {
-    console.error('Payment success error:', error);
+    logger.error('COD payment processing error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error'
@@ -168,106 +80,80 @@ export const paymentSuccess = async (req, res) => {
   }
 };
 
-// Payment failure callback (for real SSL Commerz - kept for future use)
-export const paymentFail = async (req, res) => {
+// Confirm COD payment (when customer pays on delivery)
+export const confirmCODPayment = async (req, res) => {
   try {
-    const { tran_id, error } = req.body;
+    const { orderId, transactionId } = req.body;
+    const userId = req.user.id;
 
-    console.log('Real SSL Commerz failure callback:', { tran_id, error });
+    // Find the order
+    const order = await Order.findOne({ 
+      _id: orderId, 
+      user: userId,
+      transactionId: transactionId 
+    });
 
-    // Find order by transaction ID
-    const order = await Order.findOne({ transactionId: tran_id });
-    
-    if (order) {
-      // Update order status
-      await Order.findByIdAndUpdate(order._id, {
-        status: 'cancelled',
-        paymentStatus: 'failed',
-        paymentDetails: {
-          transactionId: tran_id,
-          error: error,
-          failedDate: new Date()
-        }
+    if (!order) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Order not found or transaction ID mismatch' 
       });
     }
 
-    res.json({
-      success: false,
-      message: 'Payment failed',
-      error: error
-    });
-  } catch (error) {
-    console.error('Payment fail error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
-};
-
-// Payment cancel callback (for real SSL Commerz - kept for future use)
-export const paymentCancel = async (req, res) => {
-  try {
-    const { tran_id } = req.body;
-
-    console.log('Real SSL Commerz cancel callback:', { tran_id });
-
-    // Find order by transaction ID
-    const order = await Order.findOne({ transactionId: tran_id });
-    
-    if (order) {
-      // Update order status
-      await Order.findByIdAndUpdate(order._id, {
-        status: 'cancelled',
-        paymentStatus: 'cancelled',
-        paymentDetails: {
-          transactionId: tran_id,
-          cancelledDate: new Date()
-        }
+    if (order.paymentStatus === 'completed') {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Payment already confirmed' 
       });
     }
 
-    res.json({
-      success: false,
-      message: 'Payment cancelled'
-    });
-  } catch (error) {
-    console.error('Payment cancel error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
-};
-
-// IPN (Instant Payment Notification) handler (for real SSL Commerz - kept for future use)
-export const paymentIPN = async (req, res) => {
-  try {
-    const { tran_id, val_id, amount, store_amount, currency, status } = req.body;
-
-    console.log('Real SSL Commerz IPN:', { tran_id, val_id, amount, currency, status });
-
-    // Find and update order
-    const order = await Order.findOne({ transactionId: tran_id });
-    
-    if (order) {
-      await Order.findByIdAndUpdate(order._id, {
-        status: 'confirmed',
+    // Update payment status
+    const updatedOrder = await Order.findByIdAndUpdate(
+      orderId,
+      {
         paymentStatus: 'completed',
-        paymentDetails: {
-          transactionId: tran_id,
-          validationId: val_id,
-          amount: amount,
-          currency: currency,
-          paymentDate: new Date()
+        isPaid: true,
+        paidAt: new Date(),
+        'paymentDetails.paymentDate': new Date()
+      },
+      { new: true }
+    ).populate('user orderItems.product');
+
+    // Update product stock (reduce sold quantities)
+    for (const item of order.orderItems) {
+      await Product.findByIdAndUpdate(
+        item.product._id,
+        { 
+          $inc: { 
+            sold: item.quantity,
+            stock: -item.quantity 
+          }
         }
-      });
+      );
     }
 
-    res.status(200).send('OK');
+    // Log business event
+    logBusiness('COD_PAYMENT_CONFIRMED', {
+      orderId: order._id,
+      userId: userId,
+      amount: order.totalAmount,
+      transactionId: transactionId
+    });
+
+    logger.info(`COD payment confirmed: ${orderId} - Amount: ৳${order.totalAmount}`);
+
+    res.json({
+      success: true,
+      message: 'Payment confirmed successfully',
+      order: updatedOrder
+    });
+
   } catch (error) {
-    console.error('IPN error:', error);
-    res.status(500).send('ERROR');
+    logger.error('COD payment confirmation error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
   }
 };
 
@@ -277,29 +163,86 @@ export const getPaymentStatus = async (req, res) => {
     const { orderId } = req.params;
     const userId = req.user.id;
 
-    const order = await Order.findOne({ _id: orderId, user: userId });
-    
+    const order = await Order.findOne({ _id: orderId, user: userId })
+      .select('transactionId paymentStatus paymentMethod totalAmount status isPaid paidAt')
+      .lean();
+
     if (!order) {
-      return res.status(404).json({ message: 'Order not found' });
+      return res.status(404).json({ 
+        success: false,
+        message: 'Order not found' 
+      });
     }
 
     res.json({
       success: true,
-      order: {
-        id: order._id,
-        status: order.status,
-        paymentStatus: order.paymentStatus,
-        totalAmount: order.totalAmount,
+      payment: {
+        orderId: order._id,
         transactionId: order.transactionId,
         paymentMethod: order.paymentMethod,
-        paymentDetails: order.paymentDetails
+        paymentStatus: order.paymentStatus,
+        amount: order.totalAmount,
+        isPaid: order.isPaid,
+        paidAt: order.paidAt,
+        status: order.status
       }
     });
+
   } catch (error) {
-    console.error('Get payment status error:', error);
+    logger.error('Get payment status error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error'
     });
   }
-}; 
+};
+
+// Get COD payment instructions
+export const getCODPaymentInstructions = async (req, res) => {
+  try {
+    const instructions = {
+      method: 'Cash on Delivery',
+      description: 'Pay when your order is delivered',
+      instructions: [
+        'Your order will be prepared and dispatched within 24 hours',
+        'Our delivery person will contact you before delivery',
+        'Please have the exact amount ready for payment',
+        'You can pay in cash when the order is delivered',
+        'No advance payment required'
+      ],
+      deliveryTime: '1-3 business days',
+      contactInfo: {
+        phone: '+880 1234-567890',
+        email: 'support@prokrishi.com'
+      },
+      terms: [
+        'COD is available for orders above ৳200',
+        'Delivery charges may apply based on location',
+        'Please verify the order before payment',
+        'Returns accepted within 24 hours of delivery'
+      ]
+    };
+
+    res.json({
+      success: true,
+      codInstructions: instructions
+    });
+
+  } catch (error) {
+    logger.error('Get COD instructions error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+// Legacy functions for backward compatibility (simplified)
+export const createPaymentSession = processCODPayment;
+export const paymentSuccess = confirmCODPayment;
+export const paymentFail = (req, res) => {
+  res.status(400).json({
+    success: false,
+    message: 'Payment failed - COD orders cannot fail'
+  });
+};

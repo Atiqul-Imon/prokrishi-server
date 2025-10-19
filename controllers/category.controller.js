@@ -73,7 +73,17 @@ export const createCategory = async (req, res) => {
 // Get All Categories
 export const getCategories = async (req, res) => {
   try {
-    const categories = await Category.find().sort({ createdAt: -1 });
+    const categories = await Category.find()
+      .select('-__v -cloudinary_id') // Exclude unnecessary fields
+      .lean() // Return plain objects for better performance
+      .sort({ createdAt: -1 });
+    
+    // Categories change infrequently, cache aggressively
+    res.set({
+      'Cache-Control': 'public, max-age=3600, s-maxage=7200', // 1 hour client, 2 hours CDN
+      'ETag': '"categories-all"'
+    });
+    
     res.status(200).json({ success: true, categories });
   } catch (error) {
     res.status(500).json({
@@ -87,7 +97,9 @@ export const getCategories = async (req, res) => {
 // Get Single Category by ID
 export const getCategoryById = async (req, res) => {
     try {
-        const category = await Category.findById(req.params.id);
+        const category = await Category.findById(req.params.id)
+            .select('-__v')
+            .lean();
 
         if (!category) {
             return res.status(404).json({
@@ -95,6 +107,12 @@ export const getCategoryById = async (req, res) => {
                 success: false,
             });
         }
+
+        // Add cache headers
+        res.set({
+            'Cache-Control': 'public, max-age=1800, s-maxage=3600', // 30 min client, 1 hour CDN
+            'ETag': `"category-${req.params.id}"`
+        });
 
         res.status(200).json({ success: true, category });
     } catch (error) {

@@ -1,6 +1,8 @@
 import Product from "../models/product.model.js";
 import Category from "../models/category.model.js";
 import { v2 as cloudinary } from "cloudinary";
+import cacheService from "../services/cache.js";
+import logger, { logPerformance } from "../services/logger.js";
 
 // Cloudinary config
 cloudinary.config({
@@ -53,6 +55,12 @@ export const createProduct = async (req, res) => {
       image: imageUrl,
     });
 
+    // Invalidate product caches
+    await cacheService.delPattern('products:*');
+    await cacheService.delPattern('categories:*');
+
+    logger.info(`Product created: ${newProduct.name} (ID: ${newProduct._id})`);
+
     res.status(201).json({
       message: "Product created successfully",
       product: newProduct,
@@ -70,13 +78,71 @@ export const createProduct = async (req, res) => {
 
 // ✅ GET ALL PRODUCTS
 export const getAllProducts = async (req, res) => {
+  const startTime = Date.now();
+  
   try {
-    const products = await Product.find()
-      .populate("category", "name slug")
-      .sort({ createdAt: -1 });
+    const { page = 1, limit = 20, category, search, sort = 'createdAt', order = 'desc' } = req.query;
+    const cacheKey = cacheService.generateKey('products', `page:${page}`, `limit:${limit}`, `category:${category || 'all'}`, `search:${search || 'none'}`, `sort:${sort}`, `order:${order}`);
+    
+    // Try to get from cache first
+    const cachedProducts = await cacheService.get(cacheKey);
+    if (cachedProducts) {
+      logPerformance('getAllProducts', Date.now() - startTime, { source: 'cache' });
+      return res.status(200).json({ 
+        products: cachedProducts.products, 
+        pagination: cachedProducts.pagination,
+        success: true 
+      });
+    }
 
-    res.status(200).json({ products, success: true });
+    // Build query
+    const query = {};
+    if (category) query.category = category;
+    if (search) {
+      query.$text = { $search: search };
+    }
+
+    // Build sort object
+    const sortObj = {};
+    sortObj[sort] = order === 'desc' ? -1 : 1;
+
+    // Calculate pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const totalProducts = await Product.countDocuments(query);
+
+    // Fetch products with optimizations
+    const products = await Product.find(query)
+      .populate("category", "name slug")
+      .select('-__v') // Exclude version key
+      .lean() // Return plain objects (30% faster)
+      .sort(sortObj)
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const pagination = {
+      currentPage: parseInt(page),
+      totalPages: Math.ceil(totalProducts / parseInt(limit)),
+      totalProducts,
+      hasNext: skip + products.length < totalProducts,
+      hasPrev: parseInt(page) > 1
+    };
+
+    const result = { products, pagination };
+
+    // Cache the result for 5 minutes
+    await cacheService.set(cacheKey, result, 300);
+
+    logPerformance('getAllProducts', Date.now() - startTime, { source: 'database', count: products.length });
+    
+    // Add HTTP cache headers for CDN and browser caching
+    res.set({
+      'Cache-Control': 'public, max-age=300, s-maxage=600', // 5 min client, 10 min CDN
+      'ETag': `"products-${page}-${category || 'all'}"`
+    });
+    
+    res.status(200).json({ ...result, success: true });
   } catch (error) {
+    logger.error('Error fetching products:', error);
     res.status(500).json({
       message: "Error fetching products",
       error: true,
@@ -87,14 +153,41 @@ export const getAllProducts = async (req, res) => {
 
 // ✅ GET SINGLE PRODUCT BY ID
 export const getProductById = async (req, res) => {
+  const startTime = Date.now();
+  
   try {
-    const product = await Product.findById(req.params.id).populate('category');
+    const cacheKey = cacheService.keys.PRODUCT(req.params.id);
+    
+    // Try to get from cache first
+    const cachedProduct = await cacheService.get(cacheKey);
+    if (cachedProduct) {
+      logPerformance('getProductById', Date.now() - startTime, { source: 'cache' });
+      return res.status(200).json({ product: cachedProduct, success: true });
+    }
 
-    if (!product)
+    const product = await Product.findById(req.params.id)
+      .populate('category')
+      .select('-__v')
+      .lean();
+
+    if (!product) {
       return res.status(404).json({ message: "Product not found", success: false });
+    }
 
-    res.status(200).json(product);
+    // Cache the product for 10 minutes
+    await cacheService.set(cacheKey, product, 600);
+
+    logPerformance('getProductById', Date.now() - startTime, { source: 'database' });
+    
+    // Add HTTP cache headers (individual products can be cached longer)
+    res.set({
+      'Cache-Control': 'public, max-age=600, s-maxage=3600', // 10 min client, 1 hour CDN
+      'ETag': `"product-${req.params.id}"`
+    });
+    
+    res.status(200).json({ product, success: true });
   } catch (error) {
+    logger.error('Error fetching product:', error);
     res.status(500).json({
       message: "Error fetching product",
       error: true,
@@ -187,7 +280,18 @@ export const deleteProduct = async (req, res) => {
 // @access  Public
 export const getFeaturedProducts = async (req, res) => {
   try {
-    const products = await Product.find({ isFeatured: true }).limit(10).populate('category');
+    const products = await Product.find({ isFeatured: true })
+      .limit(10)
+      .populate('category')
+      .select('-__v')
+      .lean();
+    
+    // Featured products can be cached aggressively (change less frequently)
+    res.set({
+      'Cache-Control': 'public, max-age=1800, s-maxage=7200', // 30 min client, 2 hours CDN
+      'ETag': '"featured-products"'
+    });
+    
     res.status(200).json({
       message: "Featured products fetched successfully",
       success: true,
@@ -203,7 +307,19 @@ export const getFeaturedProducts = async (req, res) => {
 // @access  Public
 export const getPopularProducts = async (req, res) => {
   try {
-    const products = await Product.find({}).sort({ stock: -1 }).limit(10).populate('category');
+    const products = await Product.find({})
+      .sort({ sold: -1 }) // Changed from stock to sold (actual popularity)
+      .limit(10)
+      .populate('category')
+      .select('-__v')
+      .lean();
+    
+    // Popular products can be cached aggressively
+    res.set({
+      'Cache-Control': 'public, max-age=1800, s-maxage=7200', // 30 min client, 2 hours CDN
+      'ETag': '"popular-products"'
+    });
+    
     res.status(200).json({
       message: "Popular products fetched successfully",
       success: true,
@@ -338,9 +454,11 @@ export const searchProducts = async (req, res) => {
     // Calculate pagination
     const skip = (Number(page) - 1) * Number(limit);
 
-    // Execute search
+    // Execute search with optimizations
     const products = await Product.find(searchQuery)
       .populate('category', 'name slug')
+      .select('-__v')
+      .lean() // Return plain objects for better performance
       .sort(sortOptions)
       .skip(skip)
       .limit(Number(limit));
@@ -349,7 +467,15 @@ export const searchProducts = async (req, res) => {
     const total = await Product.countDocuments(searchQuery);
 
     // Get categories for filter options
-    const categories = await Category.find().select('name _id slug');
+    const categories = await Category.find()
+      .select('name _id slug')
+      .lean();
+
+    // Add cache headers for search results
+    res.set({
+      'Cache-Control': 'public, max-age=180, s-maxage=300', // 3 min client, 5 min CDN
+      'Vary': 'Accept-Encoding'
+    });
 
     res.status(200).json({
       message: "Search completed successfully",
