@@ -2,18 +2,33 @@ import Redis from 'ioredis';
 
 class CacheService {
   constructor() {
-    // Primary Redis instance with optimized configuration
-    this.redis = new Redis({
-      host: process.env.REDIS_HOST || 'localhost',
-      port: process.env.REDIS_PORT || 6379,
-      password: process.env.REDIS_PASSWORD,
-      retryDelayOnFailover: 100,
-      enableReadyCheck: false,
-      maxRetriesPerRequest: null,
-      // Connection pooling optimization
-      family: 4,
-      keepAlive: true,
-    });
+    // Initialize Redis with error handling
+    try {
+      this.redis = new Redis({
+        host: process.env.REDIS_HOST || 'localhost',
+        port: process.env.REDIS_PORT || 6379,
+        password: process.env.REDIS_PASSWORD,
+        retryDelayOnFailover: 100,
+        enableReadyCheck: false,
+        maxRetriesPerRequest: null,
+        // Connection pooling optimization
+        family: 4,
+        keepAlive: true,
+      });
+
+      // Handle Redis connection errors
+      this.redis.on('error', (err) => {
+        console.warn('Redis connection error:', err.message);
+        this.redis = null; // Disable Redis on error
+      });
+
+      this.redis.on('connect', () => {
+        console.log('✅ Redis connected successfully');
+      });
+    } catch (error) {
+      console.warn('Redis initialization failed:', error.message);
+      this.redis = null; // Disable Redis on error
+    }
 
     // Multi-layer cache configuration
     this.layers = {
@@ -42,6 +57,11 @@ class CacheService {
   // Set cache with TTL and layer optimization
   async set(key, value, ttl = 3600, layer = 'L2') {
     try {
+      if (!this.redis) {
+        console.warn('Redis not available, skipping cache set');
+        return false;
+      }
+      
       const serializedValue = JSON.stringify(value);
       const layerConfig = this.layers[layer];
       const finalTtl = layerConfig ? layerConfig.ttl : ttl;
@@ -58,6 +78,12 @@ class CacheService {
   // Get cache with statistics tracking
   async get(key) {
     try {
+      if (!this.redis) {
+        console.warn('Redis not available, skipping cache get');
+        this.stats.misses++;
+        return null;
+      }
+      
       const value = await this.redis.get(key);
       if (value) {
         this.stats.hits++;
@@ -76,7 +102,13 @@ class CacheService {
   // Delete cache
   async del(key) {
     try {
+      if (!this.redis) {
+        console.warn('Redis not available, skipping cache delete');
+        return false;
+      }
+      
       await this.redis.del(key);
+      this.stats.deletes++;
       return true;
     } catch (error) {
       console.error('Cache delete error:', error);
@@ -87,6 +119,11 @@ class CacheService {
   // Delete multiple keys
   async delPattern(pattern) {
     try {
+      if (!this.redis) {
+        console.warn('Redis not available, skipping cache delete pattern');
+        return false;
+      }
+      
       const keys = await this.redis.keys(pattern);
       if (keys.length > 0) {
         await this.redis.del(...keys);
@@ -101,6 +138,11 @@ class CacheService {
   // Check if key exists
   async exists(key) {
     try {
+      if (!this.redis) {
+        console.warn('Redis not available, skipping cache exists check');
+        return false;
+      }
+      
       const result = await this.redis.exists(key);
       return result === 1;
     } catch (error) {

@@ -102,104 +102,27 @@ export const getAllProducts = async (req, res) => {
       });
     }
 
-    // Build aggregation pipeline for optimized query (3x faster than find + populate)
-    const pipeline = [
-      // Match stage with optimized filters
-      {
-        $match: {
-          ...(category && { category: new mongoose.Types.ObjectId(category) }),
-          ...(search && { $text: { $search: search } }),
-          status: 'active' // Only active products
-        }
-      },
-      
-      // Lookup category in single operation (3x faster than populate)
-      {
-        $lookup: {
-          from: 'categories',
-          localField: 'category',
-          foreignField: '_id',
-          as: 'categoryInfo',
-          pipeline: [
-            { $project: { name: 1, slug: 1 } }
-          ]
-        }
-      },
-      
-      // Unwind category for better performance
-      {
-        $unwind: {
-          path: '$categoryInfo',
-          preserveNullAndEmptyArrays: true
-        }
-      },
-      
-      // Add computed fields for business logic
-      {
-        $addFields: {
-          category: '$categoryInfo',
-          isLowStock: { $lt: ['$stock', 10] },
-          profitMargin: { $subtract: ['$price', { $multiply: ['$price', 0.3] }] },
-          // Add image optimization fields
-          optimizedImage: {
-            $cond: {
-              if: { $ne: ['$image', null] },
-              then: {
-                thumbnail: { $concat: ['$image', '?w=150&h=150&f=webp&q=80'] },
-                small: { $concat: ['$image', '?w=300&h=300&f=webp&q=85'] },
-                medium: { $concat: ['$image', '?w=600&h=600&f=webp&q=90'] },
-                large: { $concat: ['$image', '?w=1200&h=1200&f=webp&q=95'] }
-              },
-              else: null
-            }
-          }
-        }
-      },
-      
-      // Project only needed fields (reduces data transfer by 40%)
-      {
-        $project: {
-          _id: 1,
-          name: 1,
-          price: 1,
-          stock: 1,
-          image: 1,
-          optimizedImage: 1,
-          sku: 1,
-          isFeatured: 1,
-          category: 1,
-          isLowStock: 1,
-          profitMargin: 1,
-          createdAt: 1,
-          // Exclude heavy fields
-          description: 0,
-          __v: 0
-        }
-      },
-      
-      // Sort
-      {
-        $sort: { [sort]: order === 'desc' ? -1 : 1 }
-      },
-      
-      // Facet for pagination and total count in single query
-      {
-        $facet: {
-          data: [
-            { $skip: (parseInt(page) - 1) * parseInt(limit) },
-            { $limit: parseInt(limit) }
-          ],
-          totalCount: [
-            { $count: 'count' }
-          ]
-        }
-      }
-    ];
+    // Simplified query for better reliability
+    const query = {};
+    if (category) {
+      query.category = new mongoose.Types.ObjectId(category);
+    }
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+      ];
+    }
+    query.status = 'active';
 
-    const [aggregationResult] = await Product.aggregate(pipeline);
-    
-    const products = aggregationResult.data;
-    const totalProducts = aggregationResult.totalCount[0]?.count || 0;
+    const products = await Product.find(query)
+      .populate('category', 'name slug')
+      .sort({ [sort]: order === 'desc' ? -1 : 1 })
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(parseInt(limit))
+      .lean();
+
+    const totalProducts = await Product.countDocuments(query);
 
     const pagination = {
       currentPage: parseInt(page),

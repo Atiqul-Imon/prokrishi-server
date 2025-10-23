@@ -70,10 +70,7 @@ export const getOptimizedProducts = async (req, res) => {
           category: 1,
           isLowStock: 1,
           profitMargin: 1,
-          createdAt: 1,
-          // Exclude heavy fields
-          description: 0,
-          __v: 0
+          createdAt: 1
         }
       },
       
