@@ -1,5 +1,6 @@
 import Product from "../models/product.model.js";
 import Category from "../models/category.model.js";
+import mongoose from "mongoose";
 import { v2 as cloudinary } from "cloudinary";
 import cacheService from "../services/cache.js";
 import logger, { logPerformance } from "../services/logger.js";
@@ -231,6 +232,8 @@ export const updateProduct = async (req, res) => {
       updateData.image = uploadResult.secure_url;
     }
 
+    console.log("Updating product with data:", updateData);
+    
     const updatedProduct = await Product.findByIdAndUpdate(
       req.params.id,
       updateData,
@@ -239,6 +242,19 @@ export const updateProduct = async (req, res) => {
 
     if (!updatedProduct)
       return res.status(404).json({ message: "Product not found", success: false });
+
+    console.log("Updated product:", updatedProduct);
+
+    // Clear cache for this specific product and products list
+    try {
+      await cacheService.del(cacheService.keys.PRODUCT(req.params.id));
+      await cacheService.del(cacheService.keys.PRODUCTS());
+      // Also clear any cached product lists
+      await cacheService.del("products:*");
+      console.log("Cache cleared for product:", req.params.id);
+    } catch (cacheError) {
+      console.error("Cache clear error:", cacheError);
+    }
 
     res.status(200).json({
       message: "Product updated successfully",
@@ -258,15 +274,35 @@ export const updateProduct = async (req, res) => {
 // ✅ DELETE PRODUCT
 export const deleteProduct = async (req, res) => {
   try {
+    // Check if the ID is a valid MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ 
+        message: "Invalid product ID format", 
+        success: false 
+      });
+    }
+    
     const deleted = await Product.findByIdAndDelete(req.params.id);
-    if (!deleted)
+    
+    if (!deleted) {
       return res.status(404).json({ message: "Product not found", success: false });
+    }
+
+    // Clear cache for this specific product and products list
+    try {
+      await cacheService.del(cacheService.keys.PRODUCT(req.params.id));
+      await cacheService.del(cacheService.keys.PRODUCTS());
+      console.log("Cache cleared for deleted product:", req.params.id);
+    } catch (cacheError) {
+      console.error("Cache clear error:", cacheError);
+    }
 
     res.status(200).json({
       message: "Product deleted successfully",
       success: true,
     });
   } catch (error) {
+    console.error("Delete product error:", error);
     res.status(500).json({
       message: "Error deleting product",
       error: true,
@@ -281,7 +317,6 @@ export const deleteProduct = async (req, res) => {
 export const getFeaturedProducts = async (req, res) => {
   try {
     const products = await Product.find({ isFeatured: true })
-      .limit(10)
       .populate('category')
       .select('-__v')
       .lean();

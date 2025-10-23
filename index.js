@@ -12,6 +12,7 @@ import cartRouter from "./routes/cart.route.js";
 import orderRouter from "./routes/order.route.js";
 import paymentRouter from "./routes/payment.route.js";
 import dashboardRoutes from "./routes/dashboard.route.js";
+import adminOrderRouter from "./routes/adminOrder.route.js";
 
 // Security and performance imports
 import { 
@@ -19,11 +20,14 @@ import {
   apiRateLimit, 
   authRateLimit, 
   strictRateLimit,
+  adminRateLimit,
+  profileRateLimit,
   sanitizeInput,
   requestLogger 
 } from "./middlewares/security.js";
 import logger, { logRequest, logError } from "./services/logger.js";
 import cacheService from "./services/cache.js";
+import { notFoundHandler, apiNotFoundHandler } from "./middlewares/notFound.js";
 
 const app = express();
 
@@ -53,7 +57,7 @@ app.use(cors({
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-CSRF-Token'],
   exposedHeaders: ['X-Total-Count', 'X-Page-Count']
 }));
@@ -76,9 +80,6 @@ app.use(cookieParser());
 // Input sanitization
 app.use(sanitizeInput);
 
-// Rate limiting
-app.use('/api/', apiRateLimit);
-
 // Health check endpoint with cache status
 app.get("/health", async (req, res) => {
   const cacheStats = await cacheService.getStats();
@@ -92,13 +93,31 @@ app.get("/health", async (req, res) => {
 });
 
 // API routes with specific rate limiting
-app.use("/api/user", authRateLimit, userRouter);
-app.use("/api/product", productRouter);
-app.use("/api/category", categoryRouter);
-app.use("/api/cart", strictRateLimit, cartRouter);
-app.use("/api/order", strictRateLimit, orderRouter);
-app.use("/api/payment", strictRateLimit, paymentRouter);
-app.use("/api/dashboard", strictRateLimit, dashboardRoutes);
+// Apply auth rate limit only to login/register endpoints
+app.use("/api/user/login", authRateLimit);
+app.use("/api/user/register", authRateLimit);
+app.use("/api/user/forgot-password", authRateLimit);
+app.use("/api/user/reset-password-email", authRateLimit);
+app.use("/api/user/reset-password-phone", authRateLimit);
+
+// Apply profile rate limit to profile endpoints
+app.use("/api/user/profile", profileRateLimit);
+
+// Apply admin rate limits to admin operations
+app.use("/api/product", adminRateLimit, productRouter);
+app.use("/api/category", adminRateLimit, categoryRouter);
+app.use("/api/dashboard", adminRateLimit, dashboardRoutes);
+app.use("/api/admin/orders", adminRateLimit, adminOrderRouter);
+
+// No rate limiting for user operations
+app.use("/api/user", userRouter);
+app.use("/api/cart", cartRouter);
+app.use("/api/order", orderRouter);
+app.use("/api/payment", paymentRouter);
+
+// 404 handlers
+app.use("/api/*", apiNotFoundHandler);
+app.use("*", notFoundHandler);
 
 const PORT = process.env.PORT || 3500;
 

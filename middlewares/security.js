@@ -21,6 +21,8 @@ export const createRateLimit = (windowMs = 15 * 60 * 1000, max = 100, message = 
 export const authRateLimit = createRateLimit(15 * 60 * 1000, 5, 'Too many authentication attempts, please try again later');
 export const apiRateLimit = createRateLimit(15 * 60 * 1000, 100, 'Too many API requests, please try again later');
 export const strictRateLimit = createRateLimit(15 * 60 * 1000, 10, 'Too many requests, please try again later');
+export const adminRateLimit = createRateLimit(15 * 60 * 1000, 200, 'Too many admin requests, please try again later');
+export const profileRateLimit = createRateLimit(15 * 60 * 1000, 50, 'Too many profile requests, please try again later');
 
 // Security headers configuration
 export const securityHeaders = helmet({

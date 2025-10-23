@@ -156,7 +156,7 @@ export const updateCategory = async (req, res) => {
       return res.status(404).json({ message: "Category not found", success: false });
     }
 
-    // Handle image update
+    // Handle image update (only if file is provided)
     let image_url = category.image;
     let cloudinary_id = category.cloudinary_id;
 
@@ -171,16 +171,30 @@ export const updateCategory = async (req, res) => {
       cloudinary_id = result.public_id;
     }
 
+    // Build update object - only include fields that are provided
+    const updateData = {};
+    
+    if (name !== undefined) {
+      updateData.name = name.toLowerCase();
+      updateData.slug = slugify(name);
+    }
+    
+    if (description !== undefined) {
+      updateData.description = description;
+    }
+    
+    if (isFeatured !== undefined) {
+      updateData.isFeatured = isFeatured;
+    }
+    
+    if (req.file) {
+      updateData.image = image_url;
+      updateData.cloudinary_id = cloudinary_id;
+    }
+
     const updated = await Category.findByIdAndUpdate(
       req.params.id,
-      {
-        name: name ? name.toLowerCase() : category.name,
-        slug: name ? slugify(name) : category.slug,
-        description,
-        isFeatured,
-        image: image_url,
-        cloudinary_id,
-      },
+      updateData,
       { new: true }
     );
 

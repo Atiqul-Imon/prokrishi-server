@@ -29,8 +29,11 @@ categoryRouter.get("/id/:id", getCategoryById);
 // Get single category by slug
 categoryRouter.get("/:slug", getCategoryBySlug);
 
-// Update category by ID (admin only)
+// Update category by ID (admin only) - with file upload
 categoryRouter.put("/update/:id", authenticate, authorizeAdmin, upload.single("image"), updateCategory);
+
+// Update category by ID (admin only) - simple updates without file upload
+categoryRouter.patch("/update/:id", authenticate, authorizeAdmin, updateCategory);
 
 // Delete category by ID (admin only)
 categoryRouter.delete("/delete/:id", authenticate, authorizeAdmin, deleteCategory);
