@@ -2,7 +2,7 @@ import Product from "../models/product.model.js";
 import Category from "../models/category.model.js";
 import mongoose from "mongoose";
 import ImageKit from "imagekit";
-import cacheService from "../services/cache.js";
+// import cacheService from "../services/cache.js"; // Disabled for admin panel
 import logger, { logPerformance } from "../services/logger.js";
 
 // ImageKit config
@@ -60,9 +60,7 @@ export const createProduct = async (req, res) => {
       image: imageUrl,
     });
 
-    // Invalidate product caches
-    await cacheService.delPattern('products:*');
-    await cacheService.delPattern('categories:*');
+    // Cache disabled for admin panel
 
     logger.info(`Product created: ${newProduct.name} (ID: ${newProduct._id})`);
 
@@ -87,18 +85,7 @@ export const getAllProducts = async (req, res) => {
   
   try {
     const { page = 1, limit = 20, category, search, sort = 'createdAt', order = 'desc' } = req.query;
-    const cacheKey = cacheService.generateKey('products', `page:${page}`, `limit:${limit}`, `category:${category || 'all'}`, `search:${search || 'none'}`, `sort:${sort}`, `order:${order}`);
-    
-    // Try to get from cache first
-    const cachedProducts = await cacheService.get(cacheKey);
-    if (cachedProducts) {
-      logPerformance('getAllProducts', Date.now() - startTime, { source: 'cache' });
-      return res.status(200).json({ 
-        products: cachedProducts.products, 
-        pagination: cachedProducts.pagination,
-        success: true 
-      });
-    }
+    // Cache disabled for admin panel - always fetch from database
 
     // Simplified query for better reliability
     const query = {};
@@ -132,8 +119,7 @@ export const getAllProducts = async (req, res) => {
 
     const response = { products, pagination };
 
-    // Cache the result for 5 minutes
-    await cacheService.set(cacheKey, response, 300);
+    // Cache disabled for admin panel
 
     logPerformance('getAllProducts', Date.now() - startTime, { 
       source: 'database', 
@@ -163,14 +149,7 @@ export const getProductById = async (req, res) => {
   const startTime = Date.now();
   
   try {
-    const cacheKey = cacheService.keys.PRODUCT(req.params.id);
-    
-    // Try to get from cache first
-    const cachedProduct = await cacheService.get(cacheKey);
-    if (cachedProduct) {
-      logPerformance('getProductById', Date.now() - startTime, { source: 'cache' });
-      return res.status(200).json({ product: cachedProduct, success: true });
-    }
+    // Cache disabled for admin panel - always fetch from database
 
     const product = await Product.findById(req.params.id)
       .populate('category')
@@ -181,8 +160,7 @@ export const getProductById = async (req, res) => {
       return res.status(404).json({ message: "Product not found", success: false });
     }
 
-    // Cache the product for 10 minutes
-    await cacheService.set(cacheKey, product, 600);
+    // Cache disabled for admin panel
 
     logPerformance('getProductById', Date.now() - startTime, { source: 'database' });
     
@@ -251,16 +229,7 @@ export const updateProduct = async (req, res) => {
 
     console.log("Updated product:", updatedProduct);
 
-    // Clear cache for this specific product and products list
-    try {
-      await cacheService.del(cacheService.keys.PRODUCT(req.params.id));
-      await cacheService.del(cacheService.keys.PRODUCTS());
-      // Also clear any cached product lists
-      await cacheService.del("products:*");
-      console.log("Cache cleared for product:", req.params.id);
-    } catch (cacheError) {
-      console.error("Cache clear error:", cacheError);
-    }
+    // Cache disabled for admin panel
 
     res.status(200).json({
       message: "Product updated successfully",
@@ -294,14 +263,7 @@ export const deleteProduct = async (req, res) => {
       return res.status(404).json({ message: "Product not found", success: false });
     }
 
-    // Clear cache for this specific product and products list
-    try {
-      await cacheService.del(cacheService.keys.PRODUCT(req.params.id));
-      await cacheService.del(cacheService.keys.PRODUCTS());
-      console.log("Cache cleared for deleted product:", req.params.id);
-    } catch (cacheError) {
-      console.error("Cache clear error:", cacheError);
-    }
+    // Cache disabled for admin panel
 
     res.status(200).json({
       message: "Product deleted successfully",

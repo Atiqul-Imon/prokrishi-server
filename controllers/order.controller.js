@@ -140,23 +140,7 @@ export const getAllOrders = asyncHandler(async (req, res) => {
   } = req.query;
 
   try {
-    const cacheKey = cacheService.generateKey(
-      'orders', 
-      `page:${page}`, 
-      `limit:${limit}`, 
-      `status:${status || 'all'}`, 
-      `paymentStatus:${paymentStatus || 'all'}`,
-      `search:${search || 'none'}`,
-      `sort:${sort}`,
-      `order:${order}`
-    );
-
-    // Try cache first
-    const cachedOrders = await cacheService.get(cacheKey);
-    if (cachedOrders) {
-      logPerformance('getAllOrders', Date.now() - startTime, { source: 'cache' });
-      return res.json(cachedOrders);
-    }
+    // Cache disabled for admin panel - always fetch from database
 
     // Build query
     const query = {};
@@ -196,8 +180,7 @@ export const getAllOrders = asyncHandler(async (req, res) => {
       }
     };
 
-    // Cache for 2 minutes
-    await cacheService.set(cacheKey, result, 120);
+    // Cache disabled for admin panel
 
     logPerformance('getAllOrders', Date.now() - startTime, { 
       source: 'database', 
@@ -265,8 +248,7 @@ export const getUserOrders = asyncHandler(async (req, res) => {
       }
     };
 
-    // Cache for 5 minutes
-    await cacheService.set(cacheKey, result, 300);
+    // Cache disabled for admin panel
 
     logPerformance('getUserOrders', Date.now() - startTime, { 
       source: 'database', 
@@ -469,12 +451,7 @@ export const cancelOrder = asyncHandler(async (req, res) => {
 // @access  Private/Admin
 export const getOrderStats = asyncHandler(async (req, res) => {
   try {
-    const cacheKey = 'order:stats';
-    const cachedStats = await cacheService.get(cacheKey);
-    
-    if (cachedStats) {
-      return res.json({ success: true, stats: cachedStats });
-    }
+    // Cache disabled for admin panel - always fetch from database
 
     const stats = await Order.aggregate([
       {
@@ -511,8 +488,7 @@ export const getOrderStats = asyncHandler(async (req, res) => {
       codOrders: 0
     };
 
-    // Cache for 5 minutes
-    await cacheService.set(cacheKey, result, 300);
+    // Cache disabled for admin panel
 
     res.json({
       success: true,
