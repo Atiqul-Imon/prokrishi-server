@@ -20,9 +20,13 @@ const uploadToImageKit = (fileBuffer, fileName) => {
       fileName: fileName,
       folder: "/prokrishi/products",
       useUniqueFileName: true,
-      transformation: [
-        { width: 800, height: 600, crop: "maintain_ratio", quality: 80 }
-      ]
+      // Remove transformation array - use simple parameters instead
+      transformation: {
+        width: 800,
+        height: 600,
+        crop: "maintain_ratio",
+        quality: 80
+      }
     }, (error, result) => {
       if (error) {
         reject(error);
