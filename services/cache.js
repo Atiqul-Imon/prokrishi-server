@@ -5,21 +5,36 @@ class CacheService {
     // Initialize Redis with error handling
     try {
       // Skip Redis in production if no Redis URL is provided
-      if (process.env.NODE_ENV === 'production' && !process.env.REDIS_URL && !process.env.REDIS_HOST) {
+      if (process.env.NODE_ENV === 'production' && !process.env.REDIS_URL && !process.env.REDIS_HOST && !process.env.UPSTASH_REDIS_REST_HOST) {
         console.log('⚠️ Redis not configured for production, running without cache');
         this.redis = null;
       } else {
-        this.redis = new Redis({
+        // Use Upstash Redis if available, otherwise fallback to local Redis
+        const redisConfig = process.env.UPSTASH_REDIS_REST_HOST ? {
+          host: process.env.UPSTASH_REDIS_REST_HOST,
+          port: process.env.UPSTASH_REDIS_REST_PORT || 6379,
+          password: process.env.UPSTASH_REDIS_REST_PASSWORD,
+          tls: {
+            servername: process.env.UPSTASH_REDIS_REST_HOST
+          }, // Upstash requires TLS with proper servername
+          retryDelayOnFailover: 100,
+          enableReadyCheck: false,
+          maxRetriesPerRequest: null,
+          family: 4,
+          keepAlive: true,
+          lazyConnect: true, // Connect only when needed
+        } : {
           host: process.env.REDIS_HOST || 'localhost',
           port: process.env.REDIS_PORT || 6379,
           password: process.env.REDIS_PASSWORD,
           retryDelayOnFailover: 100,
           enableReadyCheck: false,
           maxRetriesPerRequest: null,
-          // Connection pooling optimization
           family: 4,
           keepAlive: true,
-        });
+        };
+
+        this.redis = new Redis(redisConfig);
       }
 
       // Handle Redis connection errors only if Redis is initialized
