@@ -128,8 +128,8 @@ export const userValidationRules = [
 export const productValidationRules = [
   body('name')
     .trim()
-    .isLength({ min: 3, max: 100 })
-    .withMessage('Product name must be between 3 and 100 characters'),
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Product name must be between 1 and 100 characters'),
   
   body('price')
     .isFloat({ min: 0 })
