@@ -2,6 +2,7 @@ import Redis from 'ioredis';
 
 class CacheService {
   constructor() {
+    // Primary Redis instance with optimized configuration
     this.redis = new Redis({
       host: process.env.REDIS_HOST || 'localhost',
       port: process.env.REDIS_PORT || 6379,
@@ -9,7 +10,25 @@ class CacheService {
       retryDelayOnFailover: 100,
       enableReadyCheck: false,
       maxRetriesPerRequest: null,
+      // Connection pooling optimization
+      family: 4,
+      keepAlive: true,
     });
+
+    // Multi-layer cache configuration
+    this.layers = {
+      L1: { ttl: 60, maxSize: 1000 },      // Hot data - 1 minute
+      L2: { ttl: 300, maxSize: 5000 },     // Warm data - 5 minutes  
+      L3: { ttl: 1800, maxSize: 10000 }    // Cold data - 30 minutes
+    };
+
+    // Cache statistics
+    this.stats = {
+      hits: 0,
+      misses: 0,
+      sets: 0,
+      deletes: 0
+    };
 
     this.redis.on('error', (err) => {
       console.error('Redis connection error:', err);
@@ -20,11 +39,15 @@ class CacheService {
     });
   }
 
-  // Set cache with TTL
-  async set(key, value, ttl = 3600) {
+  // Set cache with TTL and layer optimization
+  async set(key, value, ttl = 3600, layer = 'L2') {
     try {
       const serializedValue = JSON.stringify(value);
-      await this.redis.setex(key, ttl, serializedValue);
+      const layerConfig = this.layers[layer];
+      const finalTtl = layerConfig ? layerConfig.ttl : ttl;
+      
+      await this.redis.setex(key, finalTtl, serializedValue);
+      this.stats.sets++;
       return true;
     } catch (error) {
       console.error('Cache set error:', error);
@@ -32,13 +55,20 @@ class CacheService {
     }
   }
 
-  // Get cache
+  // Get cache with statistics tracking
   async get(key) {
     try {
       const value = await this.redis.get(key);
-      return value ? JSON.parse(value) : null;
+      if (value) {
+        this.stats.hits++;
+        return JSON.parse(value);
+      } else {
+        this.stats.misses++;
+        return null;
+      }
     } catch (error) {
       console.error('Cache get error:', error);
+      this.stats.misses++;
       return null;
     }
   }
@@ -150,10 +180,114 @@ class CacheService {
       return {
         memory: info,
         keyspace: keyspace,
-        connected: this.redis.status === 'ready'
+        connected: this.redis.status === 'ready',
+        performance: {
+          hits: this.stats.hits,
+          misses: this.stats.misses,
+          sets: this.stats.sets,
+          deletes: this.stats.deletes,
+          hitRate: this.stats.hits / (this.stats.hits + this.stats.misses) * 100
+        }
       };
     } catch (error) {
       console.error('Cache stats error:', error);
+      return null;
+    }
+  }
+
+  // Multi-layer cache warming
+  async warmCache() {
+    console.log('🔥 Warming cache with critical data...');
+    
+    try {
+      const criticalData = [
+        { key: 'featured_products', layer: 'L1', ttl: 60 },
+        { key: 'categories', layer: 'L2', ttl: 300 },
+        { key: 'popular_products', layer: 'L1', ttl: 60 },
+        { key: 'dashboard_stats', layer: 'L3', ttl: 1800 }
+      ];
+
+      for (const { key, layer, ttl } of criticalData) {
+        try {
+          // This would typically fetch from your actual services
+          const data = { preloaded: true, timestamp: Date.now() };
+          await this.set(key, data, ttl, layer);
+          console.log(`✅ Warmed cache for: ${key} (${layer})`);
+        } catch (error) {
+          console.error(`❌ Failed to warm cache for: ${key}`, error);
+        }
+      }
+      
+      console.log('🎉 Cache warming completed');
+    } catch (error) {
+      console.error('Cache warming failed:', error);
+    }
+  }
+
+  // Intelligent cache invalidation
+  async invalidateRelated(key) {
+    const patterns = {
+      'products': ['products:*', 'featured_products', 'popular_products'],
+      'categories': ['categories:*', 'featured_categories'],
+      'orders': ['orders:*', 'dashboard_stats', 'user_orders:*'],
+      'users': ['user:*', 'dashboard_stats']
+    };
+
+    for (const [prefix, relatedKeys] of Object.entries(patterns)) {
+      if (key.includes(prefix)) {
+        // Delete related cache entries
+        for (const pattern of relatedKeys) {
+          try {
+            const keys = await this.redis.keys(pattern);
+            if (keys.length > 0) {
+              await this.redis.del(...keys);
+              this.stats.deletes += keys.length;
+            }
+          } catch (error) {
+            console.error(`Failed to invalidate pattern ${pattern}:`, error);
+          }
+        }
+      }
+    }
+  }
+
+  // Cache compression for large data
+  async setCompressed(key, data, ttl = 3600) {
+    try {
+      const compressed = JSON.stringify(data);
+      // Use compression for large data (>1KB)
+      if (compressed.length > 1024) {
+        const zlib = await import('zlib');
+        const compressedData = zlib.gzipSync(compressed);
+        await this.redis.setex(key, ttl, compressedData);
+      } else {
+        await this.redis.setex(key, ttl, compressed);
+      }
+      this.stats.sets++;
+    } catch (error) {
+      console.error(`Cache compression error for key ${key}:`, error);
+    }
+  }
+
+  async getCompressed(key) {
+    try {
+      const data = await this.redis.get(key);
+      if (!data) return null;
+
+      // Try to decompress if it's compressed
+      try {
+        const zlib = await import('zlib');
+        const decompressed = zlib.gunzipSync(Buffer.from(data, 'binary'));
+        this.stats.hits++;
+        return JSON.parse(decompressed.toString());
+      } catch {
+        // If decompression fails, try parsing as regular JSON
+        this.stats.hits++;
+        return JSON.parse(data);
+      }
+    } catch (error) {
+      console.error(`Cache decompression error for key ${key}:`, error);
+      this.stats.misses++;
       return null;
     }
   }
