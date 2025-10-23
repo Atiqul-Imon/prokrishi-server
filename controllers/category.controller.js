@@ -1,26 +1,32 @@
 import Category from "../models/category.model.js";
 import slugify from "slugify";
-import { v2 as cloudinary } from "cloudinary";
+import ImageKit from "imagekit";
 
-// Cloudinary config
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-  secure: true,
+// ImageKit config
+const imagekit = new ImageKit({
+  publicKey: process.env.IMAGEKIT_PUBLIC_KEY || "public_rPLevZ6ISUK8z0WbJZEvelSJgEI=",
+  privateKey: process.env.IMAGEKIT_PRIVATE_KEY || "private_jcrajqVFYwqcHuAGB94pFJcs+xU=",
+  urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT || "https://ik.imagekit.io/6omjsz850"
 });
 
-// Helper: Upload to Cloudinary from buffer
-const uploadToCloudinary = (fileBuffer) => {
+// Helper: Upload to ImageKit from buffer
+const uploadToImageKit = (fileBuffer, fileName) => {
   return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      { folder: "prokrishi_categories" },
-      (error, result) => {
-        if (error) return reject(error);
+    imagekit.upload({
+      file: fileBuffer,
+      fileName: fileName,
+      folder: "/prokrishi/categories",
+      useUniqueFileName: true,
+      transformation: [
+        { width: 400, height: 300, crop: "maintain_ratio", quality: 80 }
+      ]
+    }, (error, result) => {
+      if (error) {
+        reject(error);
+      } else {
         resolve(result);
       }
-    );
-    stream.end(fileBuffer);
+    });
   });
 };
 
@@ -39,12 +45,12 @@ export const createCategory = async (req, res) => {
     }
 
     let image_url = null;
-    let cloudinary_id = null;
+    let imagekit_id = null;
 
     if (req.file) {
-      const result = await uploadToCloudinary(req.file.buffer);
-      image_url = result.secure_url;
-      cloudinary_id = result.public_id;
+      const result = await uploadToImageKit(req.file.buffer, req.file.originalname);
+      image_url = result.url;
+      imagekit_id = result.fileId;
     }
 
     const category = await Category.create({
@@ -53,7 +59,7 @@ export const createCategory = async (req, res) => {
       description,
       image: image_url,
       isFeatured: isFeatured || false,
-      cloudinary_id,
+      imagekit_id,
     });
 
     res.status(201).json({
@@ -74,7 +80,7 @@ export const createCategory = async (req, res) => {
 export const getCategories = async (req, res) => {
   try {
     const categories = await Category.find()
-      .select('-__v -cloudinary_id') // Exclude unnecessary fields
+      .select('-__v -imagekit_id') // Exclude unnecessary fields
       .lean() // Return plain objects for better performance
       .sort({ createdAt: -1 });
     
@@ -158,17 +164,13 @@ export const updateCategory = async (req, res) => {
 
     // Handle image update (only if file is provided)
     let image_url = category.image;
-    let cloudinary_id = category.cloudinary_id;
+    let imagekit_id = category.imagekit_id;
 
     if (req.file) {
-      // Delete old image from Cloudinary
-      if (category.cloudinary_id) {
-        await cloudinary.uploader.destroy(category.cloudinary_id);
-      }
-      // Upload new image
-      const result = await uploadToCloudinary(req.file.buffer);
-      image_url = result.secure_url;
-      cloudinary_id = result.public_id;
+      // Upload new image (ImageKit handles cleanup automatically)
+      const result = await uploadToImageKit(req.file.buffer, req.file.originalname);
+      image_url = result.url;
+      imagekit_id = result.fileId;
     }
 
     // Build update object - only include fields that are provided
@@ -189,7 +191,7 @@ export const updateCategory = async (req, res) => {
     
     if (req.file) {
       updateData.image = image_url;
-      updateData.cloudinary_id = cloudinary_id;
+      updateData.imagekit_id = imagekit_id;
     }
 
     const updated = await Category.findByIdAndUpdate(
@@ -217,10 +219,7 @@ export const deleteCategory = async (req, res) => {
         return res.status(404).json({ message: "Category not found", success: false });
     }
 
-    // Delete image from cloudinary
-    if (category.cloudinary_id) {
-        await cloudinary.uploader.destroy(category.cloudinary_id);
-    }
+    // ImageKit handles cleanup automatically, no manual deletion needed
     
     await Category.findByIdAndDelete(req.params.id);
 
