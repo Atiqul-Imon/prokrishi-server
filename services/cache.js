@@ -4,27 +4,35 @@ class CacheService {
   constructor() {
     // Initialize Redis with error handling
     try {
-      this.redis = new Redis({
-        host: process.env.REDIS_HOST || 'localhost',
-        port: process.env.REDIS_PORT || 6379,
-        password: process.env.REDIS_PASSWORD,
-        retryDelayOnFailover: 100,
-        enableReadyCheck: false,
-        maxRetriesPerRequest: null,
-        // Connection pooling optimization
-        family: 4,
-        keepAlive: true,
-      });
+      // Skip Redis in production if no Redis URL is provided
+      if (process.env.NODE_ENV === 'production' && !process.env.REDIS_URL && !process.env.REDIS_HOST) {
+        console.log('⚠️ Redis not configured for production, running without cache');
+        this.redis = null;
+      } else {
+        this.redis = new Redis({
+          host: process.env.REDIS_HOST || 'localhost',
+          port: process.env.REDIS_PORT || 6379,
+          password: process.env.REDIS_PASSWORD,
+          retryDelayOnFailover: 100,
+          enableReadyCheck: false,
+          maxRetriesPerRequest: null,
+          // Connection pooling optimization
+          family: 4,
+          keepAlive: true,
+        });
+      }
 
-      // Handle Redis connection errors
-      this.redis.on('error', (err) => {
-        console.warn('Redis connection error:', err.message);
-        this.redis = null; // Disable Redis on error
-      });
+      // Handle Redis connection errors only if Redis is initialized
+      if (this.redis) {
+        this.redis.on('error', (err) => {
+          console.warn('Redis connection error:', err.message);
+          this.redis = null; // Disable Redis on error
+        });
 
-      this.redis.on('connect', () => {
-        console.log('✅ Redis connected successfully');
-      });
+        this.redis.on('connect', () => {
+          console.log('✅ Redis connected successfully');
+        });
+      }
     } catch (error) {
       console.warn('Redis initialization failed:', error.message);
       this.redis = null; // Disable Redis on error
@@ -45,9 +53,10 @@ class CacheService {
       deletes: 0
     };
 
-    this.redis.on('error', (err) => {
-      console.error('Redis connection error:', err);
-    });
+    // Add method to check Redis availability
+    this.isRedisAvailable = () => {
+      return this.redis && this.redis.status === 'ready';
+    };
 
     this.redis.on('connect', () => {
       console.log('✅ Redis connected successfully');

@@ -208,7 +208,7 @@ connectDB().then(() => {
   app.listen(PORT, () => {
     logger.info(`🚀 Server is running on port ${PORT}`);
     logger.info(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-    logger.info(`📊 Cache service: ${cacheService.redis.status}`);
+    logger.info(`📊 Cache service: ${cacheService.isRedisAvailable() ? 'ready' : 'disabled (Redis unavailable)'}`);
   });
 }).catch((error) => {
   logError(error);
