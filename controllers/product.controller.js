@@ -157,7 +157,12 @@ export const getProductById = async (req, res) => {
       .lean();
 
     if (!product) {
-      return res.status(404).json({ message: "Product not found", success: false });
+      logger.warn(`Product not found: ${req.params.id}`);
+      return res.status(404).json({ 
+        message: "Product not found", 
+        success: false,
+        productId: req.params.id 
+      });
     }
 
     // Cache disabled for admin panel
