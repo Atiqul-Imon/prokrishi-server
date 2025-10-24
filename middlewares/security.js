@@ -136,8 +136,26 @@ export const productValidationRules = [
     .withMessage('Price must be a positive number'),
   
   body('stock')
-    .isInt({ min: 0 })
-    .withMessage('Stock must be a non-negative integer'),
+    .isFloat({ min: 0 })
+    .withMessage('Stock must be a non-negative number'),
+  
+  body('measurement')
+    .isFloat({ min: 0.01 })
+    .withMessage('Measurement must be at least 0.01'),
+  
+  body('unit')
+    .isIn(['pcs', 'kg', 'g', 'l', 'ml'])
+    .withMessage('Unit must be one of: pcs, kg, g, l, ml'),
+  
+  body('minOrderQuantity')
+    .optional()
+    .isFloat({ min: 0.01 })
+    .withMessage('Minimum order quantity must be at least 0.01'),
+  
+  body('measurementIncrement')
+    .optional()
+    .isFloat({ min: 0.01 })
+    .withMessage('Measurement increment must be at least 0.01'),
   
   body('description')
     .optional()

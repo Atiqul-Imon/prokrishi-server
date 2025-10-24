@@ -29,6 +29,7 @@ const productSchema = new mongoose.Schema(
       type: Number,
       required: true,
       default: 1,
+      min: 0.01, // Allow fractional measurements (0.01 minimum)
     },
 
     unit: {
@@ -36,6 +37,20 @@ const productSchema = new mongoose.Schema(
       required: true,
       enum: ['pcs', 'kg', 'g', 'l', 'ml'],
       default: 'pcs',
+    },
+
+    // Add support for minimum order quantity
+    minOrderQuantity: {
+      type: Number,
+      default: 0.01,
+      min: 0.01,
+    },
+
+    // Add support for measurement increments (e.g., 0.1 for 100g increments)
+    measurementIncrement: {
+      type: Number,
+      default: 0.01,
+      min: 0.01,
     },
 
     stock: {
@@ -79,6 +94,33 @@ const productSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+// Virtual field for display measurement
+productSchema.virtual('displayMeasurement').get(function() {
+  const measurement = this.measurement;
+  const unit = this.unit;
+  
+  // Format measurement for display
+  if (measurement >= 1) {
+    return `${measurement} ${unit}`;
+  } else if (measurement >= 0.1) {
+    return `${measurement} ${unit}`;
+  } else {
+    // Convert to smaller units for better display
+    if (unit === 'kg' && measurement < 0.1) {
+      return `${(measurement * 1000).toFixed(0)}g`;
+    } else if (unit === 'l' && measurement < 0.1) {
+      return `${(measurement * 1000).toFixed(0)}ml`;
+    } else {
+      return `${measurement} ${unit}`;
+    }
+  }
+});
+
+// Virtual field for price per unit
+productSchema.virtual('pricePerUnit').get(function() {
+  return this.price / this.measurement;
+});
 
 // Pre-save hook to generate SKU for new products
 productSchema.pre('save', async function(next) {
