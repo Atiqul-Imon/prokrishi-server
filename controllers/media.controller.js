@@ -1,6 +1,6 @@
 import ImageKit from 'imagekit';
 import logger from '../services/logger.js';
-import cacheService from '../services/cache.js';
+// import cacheService from '../services/cache.js'; // Disabled for admin panel - immediate data updates
 
 // Initialize ImageKit with error handling
 let imagekit = null;
@@ -101,9 +101,7 @@ export const getAllMedia = async (req, res) => {
       hasPrev: parseInt(page) > 1
     };
 
-    // Cache the result
-    const cacheKey = `media:${page}:${limit}:${search || 'all'}:${type}:${sort}:${order}`;
-    await cacheService.set(cacheKey, { mediaFiles, pagination }, 300); // 5 minutes cache
+    // Cache disabled for admin panel - immediate data updates
 
     logger.info(`Media gallery fetched: ${mediaFiles.length} files, page ${page}`);
 
@@ -161,8 +159,7 @@ export const uploadMedia = async (req, res) => {
       customMetadata: customMetadata ? JSON.parse(customMetadata) : {}
     });
 
-    // Invalidate media cache
-    await cacheService.delPattern('media:*');
+    // Cache disabled for admin panel - immediate data updates
 
     logger.info(`Media uploaded: ${uploadResult.name} (${uploadResult.fileId})`);
 
@@ -211,8 +208,7 @@ export const deleteMedia = async (req, res) => {
     // Delete from ImageKit
     await imagekit.deleteFile(id);
 
-    // Invalidate media cache
-    await cacheService.delPattern('media:*');
+    // Cache disabled for admin panel - immediate data updates
 
     logger.info(`Media deleted: ${id}`);
 
@@ -303,8 +299,7 @@ export const updateMedia = async (req, res) => {
 
     await imagekit.updateFileDetails(id, updateData);
 
-    // Invalidate media cache
-    await cacheService.delPattern('media:*');
+    // Cache disabled for admin panel - immediate data updates
 
     logger.info(`Media updated: ${id}`);
 
