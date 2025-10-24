@@ -22,6 +22,13 @@ productRouter.get("/", getAllProducts);
 productRouter.get("/search", searchProducts);
 productRouter.get("/featured", getFeaturedProducts);
 productRouter.get("/popular", getPopularProducts);
+productRouter.get("/category", (req, res) => {
+  res.status(400).json({
+    message: "Category ID or slug is required. Use /product/category/:categoryId or /product/category/slug/:slug",
+    success: false,
+    error: true
+  });
+});
 productRouter.get("/category/:categoryId", getProductsByCategory);
 productRouter.get("/category/slug/:slug", getProductsByCategorySlug);
 productRouter.get("/:id", getProductById);

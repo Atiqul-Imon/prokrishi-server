@@ -143,11 +143,7 @@ export const getAllProducts = async (req, res) => {
       optimization: 'aggregation_pipeline'
     });
     
-    // Add HTTP cache headers for CDN and browser caching
-    res.set({
-      'Cache-Control': 'public, max-age=60, s-maxage=120', // 1 min client, 2 min CDN
-      'ETag': `"products-${page}-${category || 'all'}"`
-    });
+    // No caching for admin panel - immediate data updates
     
     res.status(200).json({ ...response, success: true });
   } catch (error) {
@@ -185,11 +181,7 @@ export const getProductById = async (req, res) => {
 
     logPerformance('getProductById', Date.now() - startTime, { source: 'database' });
     
-    // Add HTTP cache headers (individual products can be cached longer)
-    res.set({
-      'Cache-Control': 'public, max-age=120, s-maxage=300', // 2 min client, 5 min CDN
-      'ETag': `"product-${req.params.id}"`
-    });
+    // No caching for admin panel - immediate data updates
     
     res.status(200).json({ product, success: true });
   } catch (error) {
@@ -310,11 +302,7 @@ export const getFeaturedProducts = async (req, res) => {
       .select('-__v')
       .lean();
     
-    // Featured products can be cached aggressively (change less frequently)
-    res.set({
-      'Cache-Control': 'public, max-age=60, s-maxage=120', // 1 min client, 2 min CDN
-      'ETag': '"featured-products"'
-    });
+    // No caching for admin panel - immediate data updates
     
     res.status(200).json({
       message: "Featured products fetched successfully",
@@ -338,11 +326,7 @@ export const getPopularProducts = async (req, res) => {
       .select('-__v')
       .lean();
     
-    // Popular products can be cached aggressively
-    res.set({
-      'Cache-Control': 'public, max-age=60, s-maxage=120', // 1 min client, 2 min CDN
-      'ETag': '"popular-products"'
-    });
+    // No caching for admin panel - immediate data updates
     
     res.status(200).json({
       message: "Popular products fetched successfully",
@@ -495,11 +479,7 @@ export const searchProducts = async (req, res) => {
       .select('name _id slug')
       .lean();
 
-    // Add cache headers for search results
-    res.set({
-      'Cache-Control': 'public, max-age=60, s-maxage=120', // 1 min client, 2 min CDN
-      'Vary': 'Accept-Encoding'
-    });
+    // No caching for admin panel - immediate data updates
 
     res.status(200).json({
       message: "Search completed successfully",

@@ -101,11 +101,7 @@ export const getCategories = async (req, res) => {
       .lean() // Return plain objects for better performance
       .sort({ createdAt: -1 });
     
-    // Categories change infrequently, cache aggressively
-    res.set({
-      'Cache-Control': 'public, max-age=300, s-maxage=600', // 5 min client, 10 min CDN
-      'ETag': '"categories-all"'
-    });
+    // No caching for admin panel - immediate data updates
     
     res.status(200).json({ success: true, categories });
   } catch (error) {
@@ -131,11 +127,7 @@ export const getCategoryById = async (req, res) => {
             });
         }
 
-        // Add cache headers
-        res.set({
-            'Cache-Control': 'public, max-age=300, s-maxage=600', // 5 min client, 10 min CDN
-            'ETag': `"category-${req.params.id}"`
-        });
+        // No caching for admin panel - immediate data updates
 
         res.status(200).json({ success: true, category });
     } catch (error) {
