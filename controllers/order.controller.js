@@ -1,4 +1,5 @@
 import asyncHandler from 'express-async-handler';
+import mongoose from 'mongoose';
 import Order from '../models/order.model.js';
 import Product from '../models/product.model.js';
 import User from '../models/user.model.js';
@@ -27,93 +28,166 @@ export const createOrder = asyncHandler(async (req, res) => {
   }
 
   try {
-    // Validate products and check stock
-    const validatedItems = [];
-    let calculatedTotal = 0;
+    // Start database transaction to prevent overselling
+    const session = await mongoose.startSession();
+    
+    try {
+      await session.withTransaction(async () => {
+        // Validate products and check stock WITHIN transaction
+        const validatedItems = [];
+        let calculatedTotal = 0;
+        const productUpdates = [];
 
-    for (const item of orderItems) {
-      const product = await Product.findById(item.product);
-      if (!product) {
+        for (const item of orderItems) {
+          // Use findOneAndUpdate with optimistic locking to prevent race conditions
+          const product = await Product.findById(item.product).session(session);
+          if (!product) {
+            throw new Error(`Product not found: ${item.name}`);
+          }
+
+          if (product.stock < item.quantity) {
+            throw new Error(`Insufficient stock for ${item.name}. Available: ${product.stock}`);
+          }
+
+          if (product.status !== 'active') {
+            throw new Error(`Product ${item.name} is not available`);
+          }
+
+          // Reserve stock atomically using findOneAndUpdate
+          const updatedProduct = await Product.findByIdAndUpdate(
+            item.product,
+            { 
+              $inc: { 
+                stock: -item.quantity,
+                sold: item.quantity 
+              }
+            },
+            { 
+              new: true,
+              session,
+              // Ensure stock doesn't go negative
+              runValidators: true
+            }
+          );
+
+          if (updatedProduct.stock < 0) {
+            throw new Error(`Stock would go negative for ${item.name}. Available: ${product.stock}`);
+          }
+
+          const itemTotal = item.price * item.quantity;
+          calculatedTotal += itemTotal;
+
+          validatedItems.push({
+            product: product._id,
+            name: item.name,
+            quantity: item.quantity,
+            price: item.price
+          });
+
+          productUpdates.push({
+            productId: product._id,
+            quantity: item.quantity,
+            originalStock: product.stock
+          });
+        }
+
+        // Verify total price
+        if (Math.abs(calculatedTotal - totalPrice) > 0.01) {
+          throw new Error('Price mismatch detected');
+        }
+
+        // Create order within transaction
+        const order = new Order({
+          orderItems: validatedItems,
+          user: req.user._id,
+          shippingAddress,
+          paymentMethod,
+          totalPrice: calculatedTotal,
+          totalAmount: calculatedTotal,
+          status: 'pending',
+          paymentStatus: 'pending'
+        });
+
+        const createdOrder = await order.save({ session });
+        
+        // Store the created order for response
+        req.createdOrder = createdOrder;
+        req.productUpdates = productUpdates;
+      });
+
+      // Transaction completed successfully
+      const createdOrder = req.createdOrder;
+      
+      // Populate order details
+      const populatedOrder = await Order.findById(createdOrder._id)
+        .populate('user', 'name email phone')
+        .populate('orderItems.product', 'name image sku');
+
+      // Log business event
+      logBusiness('ORDER_CREATED', {
+        orderId: createdOrder._id,
+        userId: req.user._id,
+        itemCount: orderItems.length,
+        totalAmount: calculatedTotal,
+        paymentMethod: paymentMethod,
+        stockReserved: true
+      });
+
+      // Invalidate product caches to reflect stock changes
+      for (const update of req.productUpdates) {
+        await cacheService.del(`product:${update.productId}`);
+      }
+      await cacheService.delPattern(`user:${req.user._id}:orders:*`);
+
+      logPerformance('createOrder', Date.now() - startTime, { 
+        itemCount: orderItems.length,
+        totalAmount: calculatedTotal,
+        transactionUsed: true
+      });
+
+      res.status(201).json({
+        success: true,
+        message: 'Order created successfully with stock reserved',
+        order: populatedOrder
+      });
+
+    } catch (transactionError) {
+      // Transaction failed - rollback automatically handled by MongoDB
+      logger.error('Order creation transaction failed:', transactionError);
+      
+      // Return appropriate error message
+      if (transactionError.message.includes('Insufficient stock')) {
+        return res.status(400).json({
+          success: false,
+          message: transactionError.message
+        });
+      }
+      
+      if (transactionError.message.includes('Product not found')) {
         return res.status(404).json({
           success: false,
-          message: `Product not found: ${item.name}`
+          message: transactionError.message
         });
       }
-
-      if (product.stock < item.quantity) {
+      
+      if (transactionError.message.includes('not available')) {
         return res.status(400).json({
           success: false,
-          message: `Insufficient stock for ${item.name}. Available: ${product.stock}`
+          message: transactionError.message
         });
       }
-
-      if (product.status !== 'active') {
+      
+      if (transactionError.message.includes('Price mismatch')) {
         return res.status(400).json({
           success: false,
-          message: `Product ${item.name} is not available`
+          message: transactionError.message
         });
       }
-
-      const itemTotal = item.price * item.quantity;
-      calculatedTotal += itemTotal;
-
-      validatedItems.push({
-        product: product._id,
-        name: item.name,
-        quantity: item.quantity,
-        price: item.price
-      });
+      
+      throw transactionError; // Re-throw for general error handling
+    } finally {
+      await session.endSession();
     }
-
-    // Verify total price
-    if (Math.abs(calculatedTotal - totalPrice) > 0.01) {
-      return res.status(400).json({
-        success: false,
-        message: 'Price mismatch detected'
-      });
-    }
-
-    // Create order
-    const order = new Order({
-      orderItems: validatedItems,
-      user: req.user._id,
-      shippingAddress,
-      paymentMethod,
-      totalPrice: calculatedTotal,
-      totalAmount: calculatedTotal,
-      status: 'pending',
-      paymentStatus: 'pending'
-    });
-
-    const createdOrder = await order.save();
-    
-    // Populate order details
-    const populatedOrder = await Order.findById(createdOrder._id)
-      .populate('user', 'name email phone')
-      .populate('orderItems.product', 'name image sku');
-
-    // Log business event
-    logBusiness('ORDER_CREATED', {
-      orderId: createdOrder._id,
-      userId: req.user._id,
-      itemCount: orderItems.length,
-      totalAmount: calculatedTotal,
-      paymentMethod: paymentMethod
-    });
-
-    // Invalidate user orders cache
-    await cacheService.delPattern(`user:${req.user._id}:orders:*`);
-
-    logPerformance('createOrder', Date.now() - startTime, { 
-      itemCount: orderItems.length,
-      totalAmount: calculatedTotal 
-    });
-
-    res.status(201).json({
-      success: true,
-      message: 'Order created successfully',
-      order: populatedOrder
-    });
 
   } catch (error) {
     logger.error('Create order error:', error);
@@ -413,29 +487,64 @@ export const cancelOrder = asyncHandler(async (req, res) => {
       });
     }
 
-    order.status = 'cancelled';
-    order.paymentStatus = 'cancelled';
-    await order.save();
+    // Use transaction to restore stock when cancelling order
+    const session = await mongoose.startSession();
+    
+    try {
+      await session.withTransaction(async () => {
+        // Update order status within transaction
+        order.status = 'cancelled';
+        order.paymentStatus = 'cancelled';
+        await order.save({ session });
 
-    // Invalidate caches
-    await cacheService.delPattern('orders:*');
-    await cacheService.delPattern(`user:${req.user._id}:orders:*`);
-    await cacheService.del(`order:${req.params.id}`);
+        // Restore stock for all items in the cancelled order
+        for (const item of order.orderItems) {
+          await Product.findByIdAndUpdate(
+            item.product,
+            { 
+              $inc: { 
+                stock: item.quantity,
+                sold: -item.quantity 
+              }
+            },
+            { session }
+          );
+        }
+      });
 
-    // Log business event
-    logBusiness('ORDER_CANCELLED', {
-      orderId: order._id,
-      userId: req.user._id,
-      amount: order.totalAmount
-    });
+      // Transaction completed successfully
+      
+      // Invalidate caches to reflect stock restoration
+      for (const item of order.orderItems) {
+        await cacheService.del(`product:${item.product}`);
+      }
+      await cacheService.delPattern('orders:*');
+      await cacheService.delPattern(`user:${req.user._id}:orders:*`);
+      await cacheService.del(`order:${req.params.id}`);
 
-    logger.info(`Order cancelled: ${req.params.id} by user ${req.user._id}`);
+      // Log business event
+      logBusiness('ORDER_CANCELLED', {
+        orderId: order._id,
+        userId: req.user._id,
+        amount: order.totalAmount,
+        stockRestored: true
+      });
 
-    res.json({
-      success: true,
-      message: 'Order cancelled successfully',
-      order
-    });
+      logger.info(`Order cancelled: ${req.params.id} by user ${req.user._id} - Stock restored`);
+
+      res.json({
+        success: true,
+        message: 'Order cancelled successfully and stock restored',
+        order
+      });
+
+    } catch (transactionError) {
+      // Transaction failed - rollback automatically handled by MongoDB
+      logger.error('Order cancellation transaction failed:', transactionError);
+      throw transactionError;
+    } finally {
+      await session.endSession();
+    }
 
   } catch (error) {
     logger.error('Cancel order error:', error);

@@ -1,6 +1,8 @@
+import mongoose from 'mongoose';
 import Order from '../models/order.model.js';
 import Product from '../models/product.model.js';
 import User from '../models/user.model.js';
+import cacheService from '../services/cache.js';
 import logger, { logBusiness } from '../services/logger.js';
 
 // COD Payment System - Simplified for agricultural e-commerce
@@ -107,46 +109,67 @@ export const confirmCODPayment = async (req, res) => {
       });
     }
 
-    // Update payment status
-    const updatedOrder = await Order.findByIdAndUpdate(
-      orderId,
-      {
-        paymentStatus: 'completed',
-        isPaid: true,
-        paidAt: new Date(),
-        'paymentDetails.paymentDate': new Date()
-      },
-      { new: true }
-    ).populate('user orderItems.product');
+    // Use transaction for payment confirmation to ensure data consistency
+    const session = await mongoose.startSession();
+    
+    try {
+      await session.withTransaction(async () => {
+        // Update payment status within transaction
+        const updatedOrder = await Order.findByIdAndUpdate(
+          orderId,
+          {
+            paymentStatus: 'completed',
+            isPaid: true,
+            paidAt: new Date(),
+            'paymentDetails.paymentDate': new Date()
+          },
+          { new: true, session }
+        ).populate('user orderItems.product');
 
-    // Update product stock (reduce sold quantities)
-    for (const item of order.orderItems) {
-      await Product.findByIdAndUpdate(
-        item.product._id,
-        { 
-          $inc: { 
-            sold: item.quantity,
-            stock: -item.quantity 
-          }
-        }
-      );
+        // Stock was already reduced during order creation, so no need to reduce again
+        // This prevents double stock reduction that was causing overselling
+        logger.info(`Payment confirmed for order ${orderId} - stock already reserved during order creation`);
+        
+        // Store updated order for response
+        req.updatedOrder = updatedOrder;
+      });
+
+      // Transaction completed successfully
+      const updatedOrder = req.updatedOrder;
+
+      // Invalidate caches to reflect payment status change
+      await cacheService.del(`order:${orderId}`);
+      await cacheService.delPattern(`user:${userId}:orders:*`);
+      
+      // Invalidate product caches to ensure fresh stock data
+      for (const item of order.orderItems) {
+        await cacheService.del(`product:${item.product._id}`);
+      }
+
+      // Log business event
+      logBusiness('COD_PAYMENT_CONFIRMED', {
+        orderId: order._id,
+        userId: userId,
+        amount: order.totalAmount,
+        transactionId: transactionId,
+        stockAlreadyReserved: true
+      });
+
+      logger.info(`COD payment confirmed: ${orderId} - Amount: ৳${order.totalAmount} - Stock already reserved during order creation`);
+
+      res.json({
+        success: true,
+        message: 'Payment confirmed successfully',
+        order: updatedOrder
+      });
+
+    } catch (transactionError) {
+      // Transaction failed - rollback automatically handled by MongoDB
+      logger.error('Payment confirmation transaction failed:', transactionError);
+      throw transactionError;
+    } finally {
+      await session.endSession();
     }
-
-    // Log business event
-    logBusiness('COD_PAYMENT_CONFIRMED', {
-      orderId: order._id,
-      userId: userId,
-      amount: order.totalAmount,
-      transactionId: transactionId
-    });
-
-    logger.info(`COD payment confirmed: ${orderId} - Amount: ৳${order.totalAmount}`);
-
-    res.json({
-      success: true,
-      message: 'Payment confirmed successfully',
-      order: updatedOrder
-    });
 
   } catch (error) {
     logger.error('COD payment confirmation error:', error);
