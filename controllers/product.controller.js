@@ -5,16 +5,32 @@ import ImageKit from "imagekit";
 // import cacheService from "../services/cache.js"; // Disabled for admin panel
 import logger, { logPerformance } from "../services/logger.js";
 
-// ImageKit config
-const imagekit = new ImageKit({
-  publicKey: process.env.IMAGEKIT_PUBLIC_KEY || "public_rPLevZ6ISUK8z0WbJZEvelSJgEI=",
-  privateKey: process.env.IMAGEKIT_PRIVATE_KEY || "private_jcrajqVFYwqcHuAGB94pFJcs+xU=",
-  urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT || "https://ik.imagekit.io/6omjsz850"
-});
+// ImageKit config with error handling
+let imagekit = null;
+
+try {
+  if (process.env.IMAGEKIT_PUBLIC_KEY && process.env.IMAGEKIT_PRIVATE_KEY && process.env.IMAGEKIT_URL_ENDPOINT) {
+    imagekit = new ImageKit({
+      publicKey: process.env.IMAGEKIT_PUBLIC_KEY,
+      privateKey: process.env.IMAGEKIT_PRIVATE_KEY,
+      urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT
+    });
+    logger.info('✅ ImageKit initialized successfully for products');
+  } else {
+    logger.warn('⚠️ ImageKit not configured - product image features will be disabled');
+  }
+} catch (error) {
+  logger.error('❌ ImageKit initialization failed for products:', error);
+}
 
 // Helper: Upload to ImageKit from buffer
 const uploadToImageKit = (fileBuffer, fileName) => {
   return new Promise((resolve, reject) => {
+    if (!imagekit) {
+      reject(new Error('ImageKit not configured'));
+      return;
+    }
+    
     imagekit.upload({
       file: fileBuffer,
       fileName: fileName,

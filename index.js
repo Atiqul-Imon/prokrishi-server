@@ -13,6 +13,7 @@ import orderRouter from "./routes/order.route.js";
 import paymentRouter from "./routes/payment.route.js";
 import dashboardRoutes from "./routes/dashboard.route.js";
 import adminOrderRouter from "./routes/adminOrder.route.js";
+import mediaRouter from "./routes/media.route.js";
 
 // Security and performance imports
 import { 
@@ -146,6 +147,7 @@ app.use("/api/product", adminRateLimit, productRouter);
 app.use("/api/category", adminRateLimit, categoryRouter);
 app.use("/api/dashboard", adminRateLimit, dashboardRoutes);
 app.use("/api/admin/orders", adminRateLimit, adminOrderRouter);
+app.use("/api/media", adminRateLimit, mediaRouter);
 
 // No rate limiting for user operations
 app.use("/api/user", userRouter);

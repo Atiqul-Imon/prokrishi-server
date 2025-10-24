@@ -2,16 +2,32 @@ import Category from "../models/category.model.js";
 import slugify from "slugify";
 import ImageKit from "imagekit";
 
-// ImageKit config
-const imagekit = new ImageKit({
-  publicKey: process.env.IMAGEKIT_PUBLIC_KEY || "public_rPLevZ6ISUK8z0WbJZEvelSJgEI=",
-  privateKey: process.env.IMAGEKIT_PRIVATE_KEY || "private_jcrajqVFYwqcHuAGB94pFJcs+xU=",
-  urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT || "https://ik.imagekit.io/6omjsz850"
-});
+// ImageKit config with error handling
+let imagekit = null;
+
+try {
+  if (process.env.IMAGEKIT_PUBLIC_KEY && process.env.IMAGEKIT_PRIVATE_KEY && process.env.IMAGEKIT_URL_ENDPOINT) {
+    imagekit = new ImageKit({
+      publicKey: process.env.IMAGEKIT_PUBLIC_KEY,
+      privateKey: process.env.IMAGEKIT_PRIVATE_KEY,
+      urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT
+    });
+    console.log('✅ ImageKit initialized successfully for categories');
+  } else {
+    console.warn('⚠️ ImageKit not configured - category image features will be disabled');
+  }
+} catch (error) {
+  console.error('❌ ImageKit initialization failed for categories:', error);
+}
 
 // Helper: Upload to ImageKit from buffer
 const uploadToImageKit = (fileBuffer, fileName) => {
   return new Promise((resolve, reject) => {
+    if (!imagekit) {
+      reject(new Error('ImageKit not configured'));
+      return;
+    }
+    
     imagekit.upload({
       file: fileBuffer,
       fileName: fileName,
