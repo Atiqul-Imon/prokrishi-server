@@ -160,7 +160,12 @@ export const productValidationRules = [
   body('description')
     .optional()
     .isLength({ max: 1000 })
-    .withMessage('Description must not exceed 1000 characters')
+    .withMessage('Description must not exceed 1000 characters'),
+  
+  body('shortDescription')
+    .optional()
+    .isLength({ max: 100 })
+    .withMessage('Short description must not exceed 100 characters')
 ];
 
 // Request logging middleware

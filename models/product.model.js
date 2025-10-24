@@ -89,6 +89,12 @@ const productSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+
+    shortDescription: {
+      type: String,
+      maxlength: 100,
+      default: "",
+    },
   },
   {
     timestamps: true,
