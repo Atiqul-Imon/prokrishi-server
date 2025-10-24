@@ -145,7 +145,7 @@ export const getAllProducts = async (req, res) => {
     
     // Add HTTP cache headers for CDN and browser caching
     res.set({
-      'Cache-Control': 'public, max-age=300, s-maxage=600', // 5 min client, 10 min CDN
+      'Cache-Control': 'public, max-age=60, s-maxage=120', // 1 min client, 2 min CDN
       'ETag': `"products-${page}-${category || 'all'}"`
     });
     
@@ -187,7 +187,7 @@ export const getProductById = async (req, res) => {
     
     // Add HTTP cache headers (individual products can be cached longer)
     res.set({
-      'Cache-Control': 'public, max-age=600, s-maxage=3600', // 10 min client, 1 hour CDN
+      'Cache-Control': 'public, max-age=120, s-maxage=300', // 2 min client, 5 min CDN
       'ETag': `"product-${req.params.id}"`
     });
     
@@ -312,7 +312,7 @@ export const getFeaturedProducts = async (req, res) => {
     
     // Featured products can be cached aggressively (change less frequently)
     res.set({
-      'Cache-Control': 'public, max-age=1800, s-maxage=7200', // 30 min client, 2 hours CDN
+      'Cache-Control': 'public, max-age=60, s-maxage=120', // 1 min client, 2 min CDN
       'ETag': '"featured-products"'
     });
     
@@ -340,7 +340,7 @@ export const getPopularProducts = async (req, res) => {
     
     // Popular products can be cached aggressively
     res.set({
-      'Cache-Control': 'public, max-age=1800, s-maxage=7200', // 30 min client, 2 hours CDN
+      'Cache-Control': 'public, max-age=60, s-maxage=120', // 1 min client, 2 min CDN
       'ETag': '"popular-products"'
     });
     
@@ -497,7 +497,7 @@ export const searchProducts = async (req, res) => {
 
     // Add cache headers for search results
     res.set({
-      'Cache-Control': 'public, max-age=180, s-maxage=300', // 3 min client, 5 min CDN
+      'Cache-Control': 'public, max-age=60, s-maxage=120', // 1 min client, 2 min CDN
       'Vary': 'Accept-Encoding'
     });
 

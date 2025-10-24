@@ -53,11 +53,11 @@ class CacheService {
       this.redis = null; // Disable Redis on error
     }
 
-    // Multi-layer cache configuration
+    // Multi-layer cache configuration - Reduced TTL for less aggressive caching
     this.layers = {
-      L1: { ttl: 60, maxSize: 1000 },      // Hot data - 1 minute
-      L2: { ttl: 300, maxSize: 5000 },     // Warm data - 5 minutes  
-      L3: { ttl: 1800, maxSize: 10000 }    // Cold data - 30 minutes
+      L1: { ttl: 30, maxSize: 1000 },      // Hot data - 30 seconds
+      L2: { ttl: 120, maxSize: 5000 },     // Warm data - 2 minutes  
+      L3: { ttl: 300, maxSize: 10000 }      // Cold data - 5 minutes
     };
 
     // Cache statistics
@@ -78,8 +78,8 @@ class CacheService {
     });
   }
 
-  // Set cache with TTL and layer optimization
-  async set(key, value, ttl = 3600, layer = 'L2') {
+  // Set cache with TTL and layer optimization - Reduced default TTL
+  async set(key, value, ttl = 300, layer = 'L2') {
     try {
       if (!this.redis) {
         console.warn('Redis not available, skipping cache set');

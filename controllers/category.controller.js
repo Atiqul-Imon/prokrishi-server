@@ -100,7 +100,7 @@ export const getCategories = async (req, res) => {
     
     // Categories change infrequently, cache aggressively
     res.set({
-      'Cache-Control': 'public, max-age=3600, s-maxage=7200', // 1 hour client, 2 hours CDN
+      'Cache-Control': 'public, max-age=300, s-maxage=600', // 5 min client, 10 min CDN
       'ETag': '"categories-all"'
     });
     
@@ -130,7 +130,7 @@ export const getCategoryById = async (req, res) => {
 
         // Add cache headers
         res.set({
-            'Cache-Control': 'public, max-age=1800, s-maxage=3600', // 30 min client, 1 hour CDN
+            'Cache-Control': 'public, max-age=300, s-maxage=600', // 5 min client, 10 min CDN
             'ETag': `"category-${req.params.id}"`
         });
 
