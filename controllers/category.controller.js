@@ -1,6 +1,7 @@
 import Category from "../models/category.model.js";
 import slugify from "slugify";
 import ImageKit from "imagekit";
+import { generateSlug } from "../utils/slugGenerator.js";
 
 // ImageKit config with error handling
 let imagekit = null;
@@ -67,9 +68,11 @@ export const createCategory = async (req, res) => {
       imagekit_id = result.fileId;
     }
 
+    // Generate slug with proper Bangla support using utility function
+
     const category = await Category.create({
       name: name.toLowerCase(),
-      slug: slugify(name),
+      slug: generateSlug(name),
       description,
       image: image_url,
       isFeatured: isFeatured || false,
@@ -187,12 +190,14 @@ export const updateCategory = async (req, res) => {
       imagekit_id = result.fileId;
     }
 
+    // Generate slug with proper Bangla support using utility function
+
     // Build update object - only include fields that are provided
     const updateData = {};
     
     if (name !== undefined) {
       updateData.name = name.toLowerCase();
-      updateData.slug = slugify(name);
+      updateData.slug = generateSlug(name);
     }
     
     if (description !== undefined) {
