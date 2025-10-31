@@ -11,6 +11,7 @@ import {
   getProductsByCategorySlug,
   toggleProductFeatured,
   searchProducts,
+  getRelatedProducts,
 } from "../controllers/product.controller.js";
 import { authenticate, authorizeAdmin } from "../middlewares/auth.js";
 import upload from "../middlewares/multer.js";
@@ -31,6 +32,7 @@ productRouter.get("/category", (req, res) => {
 });
 productRouter.get("/category/:categoryId", getProductsByCategory);
 productRouter.get("/category/slug/:slug", getProductsByCategorySlug);
+productRouter.get("/:id/related", getRelatedProducts);
 productRouter.get("/:id", getProductById);
 
 // Protected Admin Routes

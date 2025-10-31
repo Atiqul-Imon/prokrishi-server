@@ -156,39 +156,69 @@ export const getAllProducts = async (req, res) => {
   }
 };
 
-// ✅ GET SINGLE PRODUCT BY ID
+// ✅ GET SINGLE PRODUCT BY ID OR SLUG
 export const getProductById = async (req, res) => {
   const startTime = Date.now();
   
   try {
-    // Cache disabled for admin panel - always fetch from database
+    const { id } = req.params;
+    
+    // Validate ID format
+    if (!id) {
+      return res.status(400).json({ 
+        message: "Product ID or slug is required", 
+        success: false 
+      });
+    }
 
-    const product = await Product.findById(req.params.id)
-      .populate('category')
+    // Build query - support both ObjectId and slug
+    const isObjectId = mongoose.Types.ObjectId.isValid(id);
+    const query = isObjectId 
+      ? { _id: id }
+      : { slug: id };
+
+    // Find product first
+    const product = await Product.findOne(query)
+      .populate('category', 'name slug description image')
       .select('-__v')
       .lean();
 
     if (!product) {
-      logger.warn(`Product not found: ${req.params.id}`);
+      logger.warn(`Product not found: ${id}`);
       return res.status(404).json({ 
         message: "Product not found", 
         success: false,
-        productId: req.params.id 
+        productId: id 
       });
     }
 
-    // Cache disabled for admin panel
+    // Increment view count (non-blocking - don't wait for it)
+    Product.findByIdAndUpdate(product._id, {
+      $inc: { views: 1 },
+      $set: { lastViewedAt: new Date() }
+    }).catch(err => logger.error('Error incrementing product views:', err));
 
-    logPerformance('getProductById', Date.now() - startTime, { source: 'database' });
-    
-    // No caching for admin panel - immediate data updates
+    logPerformance('getProductById', Date.now() - startTime, { 
+      source: 'database',
+      productId: product._id 
+    });
     
     res.status(200).json({ product, success: true });
   } catch (error) {
     logger.error('Error fetching product:', error);
+    
+    // More specific error handling
+    if (error.name === 'CastError') {
+      return res.status(400).json({
+        message: "Invalid product ID format",
+        error: true,
+        success: false,
+      });
+    }
+    
     res.status(500).json({
       message: "Error fetching product",
-      error: true,
+      error: error.message || "Internal server error",
       success: false,
     });
   }
@@ -409,6 +439,105 @@ export const toggleProductFeatured = async (req, res) => {
     res.status(500).json({
       message: "Error toggling featured status",
       error: error.message,
+      success: false,
+    });
+  }
+};
+
+// ✅ GET RELATED PRODUCTS
+// @desc    Get related products based on category and tags
+// @route   GET /api/product/:id/related
+// @access  Public
+export const getRelatedProducts = async (req, res) => {
+  const startTime = Date.now();
+  
+  try {
+    const { id } = req.params;
+    const limit = parseInt(req.query.limit) || 6;
+    
+    // Validate ID
+    if (!id) {
+      return res.status(400).json({ 
+        message: "Product ID is required", 
+        success: false 
+      });
+    }
+
+    // Find the current product
+    const query = mongoose.Types.ObjectId.isValid(id) 
+      ? { _id: id }
+      : { slug: id };
+    
+    const currentProduct = await Product.findOne(query).select('category tags _id');
+    
+    if (!currentProduct) {
+      return res.status(404).json({ 
+        message: "Product not found", 
+        success: false 
+      });
+    }
+
+    // Build query for related products
+    const relatedQuery = {
+      _id: { $ne: currentProduct._id },
+      status: 'active'
+    };
+
+    // Prioritize same category
+    if (currentProduct.category) {
+      relatedQuery.category = currentProduct.category;
+    }
+
+    // Find related products
+    let relatedProducts = await Product.find(relatedQuery)
+      .populate('category', 'name slug')
+      .select('name price image category stock status slug shortDescription')
+      .limit(limit * 2) // Get more to filter by tags
+      .lean();
+
+    // If we have tags, prioritize products with matching tags
+    if (currentProduct.tags && currentProduct.tags.length > 0) {
+      const taggedProducts = relatedProducts.filter(p => 
+        p.tags && p.tags.some(tag => currentProduct.tags.includes(tag))
+      );
+      const untaggedProducts = relatedProducts.filter(p => 
+        !p.tags || !p.tags.some(tag => currentProduct.tags.includes(tag))
+      );
+      relatedProducts = [...taggedProducts, ...untaggedProducts];
+    }
+
+    // Limit to requested number
+    relatedProducts = relatedProducts.slice(0, limit);
+
+    // If not enough from same category, fill with popular products
+    if (relatedProducts.length < limit) {
+      const additionalProducts = await Product.find({
+        _id: { $nin: [...relatedProducts.map(p => p._id), currentProduct._id] },
+        status: 'active'
+      })
+        .populate('category', 'name slug')
+        .select('name price image category stock status slug shortDescription')
+        .sort({ views: -1, sold: -1 })
+        .limit(limit - relatedProducts.length)
+        .lean();
+      
+      relatedProducts = [...relatedProducts, ...additionalProducts];
+    }
+
+    logPerformance('getRelatedProducts', Date.now() - startTime, { 
+      source: 'database',
+      count: relatedProducts.length 
+    });
+
+    res.status(200).json({ 
+      products: relatedProducts,
+      success: true 
+    });
+  } catch (error) {
+    logger.error('Error fetching related products:', error);
+    res.status(500).json({
+      message: "Error fetching related products",
+      error: error.message || "Internal server error",
       success: false,
     });
   }

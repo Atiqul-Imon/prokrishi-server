@@ -32,7 +32,7 @@ Fill in the following settings:
 | **Name** | `prokrishi-backend` (or your choice) |
 | **Region** | Singapore (or closest to your users) |
 | **Branch** | `main` (or your production branch) |
-| **Root Directory** | `prokrishi-dev/backend` |
+| **Root Directory** | `backend` |
 | **Runtime** | Node |
 | **Build Command** | `npm install` |
 | **Start Command** | `npm start` |
