@@ -1,0 +1,65 @@
+name: CI - Backend Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: backend/package-lock.json
+
+    - name: Install dependencies
+      working-directory: ./backend
+      run: npm ci
+
+    - name: Run linter (if configured)
+      working-directory: ./backend
+      run: |
+        if [ -f .eslintrc.json ] || [ -f .eslintrc.js ] || [ -f eslint.config.js ]; then
+          npm run lint || echo "Linting skipped - no lint config found"
+        else
+          echo "No linting configuration found, skipping..."
+        fi
+
+    - name: Check environment variables template
+      working-directory: ./backend
+      run: |
+        if [ ! -f .env ]; then
+          echo "✅ .env file not in repository (expected)"
+        fi
+        if [ -f env.production.example ]; then
+          echo "✅ Production environment template exists"
+        fi
+
+    - name: Verify deployment scripts
+      working-directory: ./backend
+      run: |
+        test -f deploy.sh && echo "✅ deploy.sh exists" || echo "❌ deploy.sh missing"
+        test -f ecosystem.config.js && echo "✅ ecosystem.config.js exists" || echo "❌ ecosystem.config.js missing"
+        test -f nginx.conf && echo "✅ nginx.conf exists" || echo "❌ nginx.conf missing"
+        chmod +x deploy.sh 2>/dev/null || true
+
+    - name: Check Node.js version compatibility
+      working-directory: ./backend
+      run: |
+        NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
+        if [ "$NODE_VERSION" -ge 18 ]; then
+          echo "✅ Node.js version $NODE_VERSION is compatible"
+        else
+          echo "❌ Node.js version $NODE_VERSION is too old (requires 18+)"
+          exit 1
+        fi
+

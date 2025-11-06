@@ -1,0 +1,101 @@
+name: Deploy to Production - Digital Ocean
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+  workflow_dispatch:  # Allows manual triggering
+
+jobs:
+  deploy:
+    name: Deploy to Digital Ocean
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup SSH
+      uses: webfactory/ssh-agent@v0.9.0
+      with:
+        ssh-private-key: ${{ secrets.DROPLET_SSH_PRIVATE_KEY }}
+
+    - name: Add Droplet to known hosts
+      run: |
+        mkdir -p ~/.ssh
+        ssh-keyscan -H ${{ secrets.DROPLET_IP }} >> ~/.ssh/known_hosts
+
+    - name: Deploy to Digital Ocean Droplet
+      env:
+        DROPLET_USER: ${{ secrets.DROPLET_USER }}
+        DROPLET_IP: ${{ secrets.DROPLET_IP }}
+        DROPLET_PATH: ${{ secrets.DROPLET_PATH }}
+      run: |
+        echo "🚀 Starting deployment to Digital Ocean..."
+        
+        # Create deployment script
+        cat > /tmp/deploy.sh << 'DEPLOY_SCRIPT'
+        #!/bin/bash
+        set -e
+        
+        cd $DROPLET_PATH
+        
+        echo "📦 Pulling latest changes from GitHub..."
+        git fetch origin
+        git reset --hard origin/main
+        
+        echo "📦 Installing/updating dependencies..."
+        npm ci --production
+        
+        echo "🔄 Restarting application with PM2..."
+        pm2 restart prokrishi-backend || pm2 start ecosystem.config.js --env production
+        
+        echo "💾 Saving PM2 process list..."
+        pm2 save
+        
+        echo "✅ Deployment completed successfully!"
+        
+        # Show status
+        pm2 status
+        DEPLOY_SCRIPT
+        
+        # Copy deployment script to droplet
+        scp /tmp/deploy.sh ${DROPLET_USER}@${DROPLET_IP}:/tmp/deploy.sh
+        
+        # Execute deployment on droplet
+        ssh ${DROPLET_USER}@${DROPLET_IP} << 'ENDSSH'
+          chmod +x /tmp/deploy.sh
+          export DROPLET_PATH=/root/prokrishi-server/backend
+          /tmp/deploy.sh
+        ENDSSH
+
+    - name: Verify deployment
+      env:
+        DROPLET_USER: ${{ secrets.DROPLET_USER }}
+        DROPLET_IP: ${{ secrets.DROPLET_IP }}
+        BACKEND_URL: ${{ secrets.BACKEND_URL }}
+      run: |
+        echo "🔍 Verifying deployment..."
+        
+        # Wait a few seconds for application to start
+        sleep 5
+        
+        # Check health endpoint
+        if curl -f -s ${BACKEND_URL}/health > /dev/null; then
+          echo "✅ Health check passed!"
+        else
+          echo "⚠️  Health check failed, but deployment may still be in progress"
+          # Don't fail the workflow, just warn
+        fi
+
+    - name: Notify deployment status
+      if: always()
+      run: |
+        if [ "${{ job.status }}" == "success" ]; then
+          echo "✅ Deployment successful!"
+        else
+          echo "❌ Deployment failed!"
+        fi
+

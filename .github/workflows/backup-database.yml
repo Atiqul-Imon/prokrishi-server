@@ -1,0 +1,35 @@
+name: Database Backup
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM UTC
+  workflow_dispatch:
+
+jobs:
+  backup:
+    name: Database Backup
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+    - name: Backup notification
+      run: |
+        echo "📦 Database backup reminder"
+        echo "⚠️  This is a placeholder workflow"
+        echo "💡 Configure MongoDB Atlas automated backups or use mongodump"
+        echo ""
+        echo "Manual backup command:"
+        echo "mongodump --uri='YOUR_MONGODB_URI' --out=/backup/$(date +%Y%m%d)"
+        
+    # Add actual backup steps if you have access to MongoDB
+    # - name: Backup MongoDB
+    #   run: |
+    #     mongodump --uri="${{ secrets.MONGODB_URI }}" --out=/tmp/backup
+    #     
+    # - name: Upload to S3/Spaces
+    #   uses: aws-actions/configure-aws-credentials@v2
+    #   with:
+    #     aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+    #     aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    #     aws-region: us-east-1
+
