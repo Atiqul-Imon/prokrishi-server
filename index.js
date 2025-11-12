@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from "express";
 import connectDB from "./config/connectDB.js";
+import mongoose from "mongoose";
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
 import cors from "cors";
@@ -223,5 +224,37 @@ app.get("/", (req, res) => {
     message: "Prokrishi Backend API is running!",
     version: "2.0.0",
     timestamp: new Date().toISOString()
+  });
+});
+
+// Health check endpoint with Redis status
+app.get("/health", async (req, res) => {
+  const redisStatus = {
+    available: cacheService.isRedisAvailable(),
+    configured: !!(process.env.REDIS_URL || process.env.REDIS_HOST || process.env.UPSTASH_REDIS_REST_HOST)
+  };
+
+  // Test Redis if available
+  if (redisStatus.available) {
+    try {
+      const testKey = 'health:check';
+      await cacheService.set(testKey, { timestamp: Date.now() }, 10);
+      const testValue = await cacheService.get(testKey);
+      await cacheService.del(testKey);
+      redisStatus.working = !!testValue;
+    } catch (error) {
+      redisStatus.working = false;
+      redisStatus.error = error.message;
+    }
+  }
+
+  res.json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    redis: redisStatus,
+    database: {
+      connected: mongoose.connection.readyState === 1
+    }
   });
 });

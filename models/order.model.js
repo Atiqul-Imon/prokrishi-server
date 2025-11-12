@@ -16,7 +16,17 @@ const orderSchema = new mongoose.Schema(
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
+      required: false, // Optional for guest orders
+    },
+    // Guest order information
+    guestInfo: {
+      name: { type: String },
+      email: { type: String },
+      phone: { type: String },
+    },
+    isGuestOrder: {
+      type: Boolean,
+      default: false,
     },
     orderItems: [orderItemSchema],
     shippingAddress: {

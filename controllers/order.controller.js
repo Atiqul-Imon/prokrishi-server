@@ -6,12 +6,18 @@ import User from '../models/user.model.js';
 import cacheService from '../services/cache.js';
 import logger, { logBusiness, logPerformance } from '../services/logger.js';
 
-// @desc    Create new order (COD optimized)
+// @desc    Create new order (COD optimized) - Supports both authenticated and guest orders
 // @route   POST /api/order/create
-// @access  Private
+// @access  Public (guest) / Private (authenticated)
 export const createOrder = asyncHandler(async (req, res) => {
   const startTime = Date.now();
-  const { orderItems, shippingAddress, paymentMethod = 'Cash on Delivery', totalPrice } = req.body;
+  const { 
+    orderItems, 
+    shippingAddress, 
+    paymentMethod = 'Cash on Delivery', 
+    totalPrice,
+    guestInfo // For guest orders: { name, email, phone }
+  } = req.body;
 
   if (!orderItems || orderItems.length === 0) {
     return res.status(400).json({
@@ -25,6 +31,19 @@ export const createOrder = asyncHandler(async (req, res) => {
       success: false,
       message: 'Shipping address is required'
     });
+  }
+
+  // Check if this is a guest order
+  const isGuestOrder = !req.user;
+  
+  // Validate guest info if it's a guest order
+  if (isGuestOrder) {
+    if (!guestInfo || !guestInfo.name || !guestInfo.phone) {
+      return res.status(400).json({
+        success: false,
+        message: 'Guest information (name and phone) is required'
+      });
+    }
   }
 
   try {
@@ -97,16 +116,29 @@ export const createOrder = asyncHandler(async (req, res) => {
         }
 
         // Create order within transaction
-        const order = new Order({
+        const orderData = {
           orderItems: validatedItems,
-          user: req.user._id,
           shippingAddress,
           paymentMethod,
           totalPrice: calculatedTotal,
           totalAmount: calculatedTotal,
           status: 'pending',
-          paymentStatus: 'pending'
-        });
+          paymentStatus: 'pending',
+          isGuestOrder: isGuestOrder,
+        };
+
+        // Add user or guest info
+        if (isGuestOrder) {
+          orderData.guestInfo = {
+            name: guestInfo.name,
+            email: guestInfo.email || '',
+            phone: guestInfo.phone,
+          };
+        } else {
+          orderData.user = req.user._id;
+        }
+
+        const order = new Order(orderData);
 
         const createdOrder = await order.save({ session });
         
@@ -122,11 +154,27 @@ export const createOrder = asyncHandler(async (req, res) => {
       const populatedOrder = await Order.findById(createdOrder._id)
         .populate('user', 'name email phone')
         .populate('orderItems.product', 'name image sku');
+      
+      // Add userInfo for response (either from user or guestInfo)
+      if (populatedOrder.user) {
+        populatedOrder.userInfo = {
+          name: populatedOrder.user.name,
+          email: populatedOrder.user.email,
+          phone: populatedOrder.user.phone,
+        };
+      } else if (populatedOrder.guestInfo) {
+        populatedOrder.userInfo = {
+          name: populatedOrder.guestInfo.name,
+          email: populatedOrder.guestInfo.email,
+          phone: populatedOrder.guestInfo.phone,
+        };
+      }
 
       // Log business event
       logBusiness('ORDER_CREATED', {
         orderId: createdOrder._id,
-        userId: req.user._id,
+        userId: isGuestOrder ? 'guest' : req.user._id,
+        isGuestOrder: isGuestOrder,
         itemCount: orderItems.length,
         totalAmount: calculatedTotal,
         paymentMethod: paymentMethod,
@@ -137,7 +185,9 @@ export const createOrder = asyncHandler(async (req, res) => {
       for (const update of req.productUpdates) {
         await cacheService.del(`product:${update.productId}`);
       }
-      await cacheService.delPattern(`user:${req.user._id}:orders:*`);
+      if (!isGuestOrder) {
+        await cacheService.delPattern(`user:${req.user._id}:orders:*`);
+      }
 
       logPerformance('createOrder', Date.now() - startTime, { 
         itemCount: orderItems.length,
@@ -243,8 +293,27 @@ export const getAllOrders = asyncHandler(async (req, res) => {
       .skip(skip)
       .limit(parseInt(limit));
 
+    // Add userInfo for each order (from user or guestInfo)
+    const ordersWithUserInfo = orders.map(order => {
+      const orderObj = order.toObject ? order.toObject() : order;
+      if (orderObj.user) {
+        orderObj.userInfo = {
+          name: orderObj.user.name,
+          email: orderObj.user.email,
+          phone: orderObj.user.phone,
+        };
+      } else if (orderObj.guestInfo) {
+        orderObj.userInfo = {
+          name: orderObj.guestInfo.name,
+          email: orderObj.guestInfo.email || '',
+          phone: orderObj.guestInfo.phone,
+        };
+      }
+      return orderObj;
+    });
+
     const result = {
-      orders,
+      orders: ordersWithUserInfo,
       pagination: {
         currentPage: parseInt(page),
         totalPages: Math.ceil(totalOrders / parseInt(limit)),

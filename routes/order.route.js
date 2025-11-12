@@ -12,7 +12,8 @@ import {
 import { authenticate, authorizeAdmin } from '../middlewares/auth.js';
 
 // Order routes
-router.route('/create').post(authenticate, createOrder);
+// Guest checkout: auth is optional, controller will handle both authenticated and guest orders
+router.route('/create').post(createOrder);
 router.route('/user').get(authenticate, getUserOrders);
 router.route('/stats').get(authenticate, authorizeAdmin, getOrderStats);
 router.route('/:id').get(authenticate, getOrderById);

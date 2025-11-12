@@ -70,12 +70,8 @@ class CacheService {
 
     // Add method to check Redis availability
     this.isRedisAvailable = () => {
-      return this.redis && this.redis.status === 'ready';
+      return this.redis && (this.redis.status === 'ready' || this.redis.status === 'connecting');
     };
-
-    this.redis.on('connect', () => {
-      console.log('✅ Redis connected successfully');
-    });
   }
 
   // Set cache with TTL and layer optimization - Reduced default TTL
