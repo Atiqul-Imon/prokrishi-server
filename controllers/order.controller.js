@@ -33,11 +33,19 @@ export const createOrder = asyncHandler(async (req, res) => {
     });
   }
 
-  // Validate that address field is provided (only required field)
-  if (!shippingAddress.address || shippingAddress.address.trim().length === 0) {
+  // Validate that address field is provided (only required field, minimum 2 characters)
+  if (!shippingAddress.address || shippingAddress.address.trim().length < 2) {
     return res.status(400).json({
       success: false,
-      message: 'Address field is required'
+      message: 'Address must be at least 2 characters'
+    });
+  }
+
+  // Validate totalPrice
+  if (totalPrice === undefined || totalPrice === null || isNaN(totalPrice) || totalPrice <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid total price'
     });
   }
 
@@ -137,12 +145,18 @@ export const createOrder = asyncHandler(async (req, res) => {
 
         // Add user or guest info
         if (isGuestOrder) {
+          if (!guestInfo || !guestInfo.name || !guestInfo.phone) {
+            throw new Error('Guest information (name and phone) is required');
+          }
           orderData.guestInfo = {
             name: guestInfo.name,
             email: guestInfo.email || '',
             phone: guestInfo.phone,
           };
         } else {
+          if (!req.user || !req.user._id) {
+            throw new Error('User authentication required for logged-in orders');
+          }
           orderData.user = req.user._id;
         }
 
@@ -150,9 +164,10 @@ export const createOrder = asyncHandler(async (req, res) => {
 
         const createdOrder = await order.save({ session });
         
-        // Store the created order for response
+        // Store the created order and calculated total for response
         req.createdOrder = createdOrder;
         req.productUpdates = productUpdates;
+        req.calculatedTotal = calculatedTotal;
       });
 
       // Transaction completed successfully
@@ -184,7 +199,7 @@ export const createOrder = asyncHandler(async (req, res) => {
         userId: isGuestOrder ? 'guest' : req.user._id,
         isGuestOrder: isGuestOrder,
         itemCount: orderItems.length,
-        totalAmount: calculatedTotal,
+        totalAmount: req.calculatedTotal || populatedOrder.totalPrice,
         paymentMethod: paymentMethod,
         stockReserved: true
       });
@@ -199,7 +214,7 @@ export const createOrder = asyncHandler(async (req, res) => {
 
       logPerformance('createOrder', Date.now() - startTime, { 
         itemCount: orderItems.length,
-        totalAmount: calculatedTotal,
+        totalAmount: req.calculatedTotal || populatedOrder.totalPrice,
         transactionUsed: true
       });
 
@@ -249,9 +264,14 @@ export const createOrder = asyncHandler(async (req, res) => {
 
   } catch (error) {
     logger.error('Create order error:', error);
+    logger.error('Error stack:', error.stack);
+    logger.error('Request body:', JSON.stringify(req.body, null, 2));
+    logger.error('User:', req.user ? req.user._id : 'guest');
+    
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: 'Internal server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
