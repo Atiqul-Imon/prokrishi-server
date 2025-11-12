@@ -33,6 +33,14 @@ export const createOrder = asyncHandler(async (req, res) => {
     });
   }
 
+  // Validate that address field is provided (only required field)
+  if (!shippingAddress.address || shippingAddress.address.trim().length === 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'Address field is required'
+    });
+  }
+
   // Check if this is a guest order
   const isGuestOrder = !req.user;
   

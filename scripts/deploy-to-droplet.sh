@@ -7,8 +7,8 @@ set -e
 
 # Configuration (can be overridden by environment variables)
 DROPLET_USER=${DROPLET_USER:-root}
-DROPLET_IP=${DROPLET_IP:-178.128.91.197}
-DROPLET_PATH=${DROPLET_PATH:-/root/prokrishi-server/backend}
+DROPLET_IP=${DROPLET_IP:-178.128.107.215}
+DROPLET_PATH=${DROPLET_PATH:-/root/prokrishi-server}
 SSH_KEY=${SSH_KEY:-~/.ssh/id_rsa}
 
 # Colors
