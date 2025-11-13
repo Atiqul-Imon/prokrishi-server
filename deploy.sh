@@ -54,7 +54,11 @@ echo -e "${GREEN}✅ Node.js version: $(node -v)${NC}"
 
 # Install/Update dependencies
 echo -e "${GREEN}📦 Installing dependencies...${NC}"
-npm ci --production
+npm ci
+
+# Build TypeScript
+echo -e "${GREEN}🔨 Building TypeScript...${NC}"
+npm run build
 
 # Create logs directory if it doesn't exist
 mkdir -p logs

@@ -2,7 +2,7 @@
 module.exports = {
   apps: [{
     name: 'prokrishi-backend',
-    script: './index.js',
+    script: './dist/index.js',
     instances: 1, // Use 'max' for cluster mode or number for specific instances
     exec_mode: 'fork', // 'cluster' for load balancing or 'fork' for single instance
     watch: false, // Set to true for development, false for production
