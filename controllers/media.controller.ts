@@ -43,6 +43,11 @@ export const getAllMedia = async (req: AuthRequest, res: Response): Promise<void
       type = 'all',
     } = req.query;
 
+    // Validate sort parameter - ImageKit doesn't accept sort in listFiles
+    // We'll do client-side sorting instead
+    const validSorts = ['createdAt', 'name', 'size'];
+    const sortParam = validSorts.includes(sort as string) ? sort : 'createdAt';
+
     // Fetch all files from ImageKit (ImageKit max limit is 1000)
     // We'll fetch in batches if needed, but for now use max limit
     let allFilesResult: any;
@@ -174,17 +179,17 @@ export const getAllMedia = async (req: AuthRequest, res: Response): Promise<void
 
     // Sort files based on sort parameter and order
     const order = req.query.order === 'asc' ? 1 : -1;
-    if (sort === 'createdAt') {
+    if (sortParam === 'createdAt') {
       mediaFiles.sort((a: any, b: any) => {
         const dateA = new Date(a.createdAt).getTime();
         const dateB = new Date(b.createdAt).getTime();
         return (dateA - dateB) * order;
       });
-    } else if (sort === 'name') {
+    } else if (sortParam === 'name') {
       mediaFiles.sort((a: any, b: any) => {
         return a.name.localeCompare(b.name) * order;
       });
-    } else if (sort === 'size') {
+    } else if (sortParam === 'size') {
       mediaFiles.sort((a: any, b: any) => {
         return (a.size - b.size) * order;
       });
