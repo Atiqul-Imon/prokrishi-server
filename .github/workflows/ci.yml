@@ -24,11 +24,9 @@ jobs:
         cache-dependency-path: package-lock.json
 
     - name: Install dependencies
-      working-directory: ./backend
       run: npm ci
 
     - name: Run linter (if configured)
-      working-directory: ./backend
       run: |
         if [ -f .eslintrc.json ] || [ -f .eslintrc.js ] || [ -f eslint.config.js ]; then
           npm run lint || echo "Linting skipped - no lint config found"
@@ -37,7 +35,6 @@ jobs:
         fi
 
     - name: Check environment variables template
-      working-directory: ./backend
       run: |
         if [ ! -f .env ]; then
           echo "✅ .env file not in repository (expected)"
@@ -47,7 +44,6 @@ jobs:
         fi
 
     - name: Verify deployment scripts
-      working-directory: ./backend
       run: |
         test -f deploy.sh && echo "✅ deploy.sh exists" || echo "❌ deploy.sh missing"
         test -f ecosystem.config.js && echo "✅ ecosystem.config.js exists" || echo "❌ ecosystem.config.js missing"
@@ -55,7 +51,6 @@ jobs:
         chmod +x deploy.sh 2>/dev/null || true
 
     - name: Check Node.js version compatibility
-      working-directory: ./backend
       run: |
         NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
         if [ "$NODE_VERSION" -ge 18 ]; then
