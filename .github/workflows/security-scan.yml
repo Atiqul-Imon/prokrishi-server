@@ -26,14 +26,12 @@ jobs:
         cache-dependency-path: package-lock.json
 
     - name: Run npm audit
-      working-directory: ./backend
       run: |
         echo "🔍 Running npm audit..."
         npm audit --audit-level=moderate || true
         echo "✅ Security audit completed"
 
     - name: Check for known vulnerabilities
-      working-directory: ./backend
       run: |
         npm audit --json > audit-report.json || true
         VULN_COUNT=$(cat audit-report.json | jq '.metadata.vulnerabilities.total // 0')
