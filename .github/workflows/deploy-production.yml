@@ -32,26 +32,47 @@ jobs:
         DROPLET_PATH: ${{ secrets.DROPLET_PATH }}
       run: |
         echo "🚀 Starting deployment to Digital Ocean..."
+        echo "📍 Deployment path: $DROPLET_PATH"
+        echo "📍 Droplet IP: $DROPLET_IP"
+        echo "📍 Droplet User: $DROPLET_USER"
         
-        # Create deployment script
+        # Create deployment script with proper variable substitution
         cat > /tmp/deploy.sh << 'DEPLOY_SCRIPT'
         #!/bin/bash
         set -e
         
-        cd $DROPLET_PATH
+        DEPLOY_PATH="$1"
+        echo "📍 Deployment path: $DEPLOY_PATH"
+        
+        # Check if path exists
+        if [ ! -d "$DEPLOY_PATH" ]; then
+          echo "❌ Error: Directory $DEPLOY_PATH does not exist!"
+          exit 1
+        fi
+        
+        cd "$DEPLOY_PATH"
         
         echo "📦 Pulling latest changes from GitHub..."
-        git fetch origin
-        git reset --hard origin/main
+        git fetch origin || { echo "⚠️  Git fetch failed, continuing..."; }
+        git reset --hard origin/main || { echo "❌ Git reset failed!"; exit 1; }
         
         echo "📦 Installing/updating dependencies..."
-        npm ci --production
+        npm ci --production || { echo "❌ npm install failed!"; exit 1; }
         
         echo "🔄 Restarting application with PM2..."
-        pm2 restart prokrishi-backend || pm2 start ecosystem.config.js --env production
+        if pm2 list | grep -q "prokrishi-backend"; then
+          pm2 restart prokrishi-backend
+        else
+          if [ -f "ecosystem.config.js" ]; then
+            pm2 start ecosystem.config.js --env production
+          else
+            echo "⚠️  ecosystem.config.js not found, trying to start with npm..."
+            pm2 start npm --name "prokrishi-backend" -- start
+          fi
+        fi
         
         echo "💾 Saving PM2 process list..."
-        pm2 save
+        pm2 save || echo "⚠️  PM2 save failed (may not be critical)"
         
         echo "✅ Deployment completed successfully!"
         
@@ -62,12 +83,8 @@ jobs:
         # Copy deployment script to droplet
         scp /tmp/deploy.sh ${DROPLET_USER}@${DROPLET_IP}:/tmp/deploy.sh
         
-        # Execute deployment on droplet
-        ssh ${DROPLET_USER}@${DROPLET_IP} << 'ENDSSH'
-          chmod +x /tmp/deploy.sh
-          export DROPLET_PATH=/root/prokrishi-server/backend
-          /tmp/deploy.sh
-        ENDSSH
+        # Execute deployment on droplet with path as argument
+        ssh ${DROPLET_USER}@${DROPLET_IP} "chmod +x /tmp/deploy.sh && /tmp/deploy.sh '$DROPLET_PATH'"
 
     - name: Verify deployment
       env:
