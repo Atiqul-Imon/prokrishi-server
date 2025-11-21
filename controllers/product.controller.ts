@@ -51,13 +51,132 @@ const uploadToImageKit = (
           resolve(result);
         }
       }
+);
+
+const normalizeVariants = (
+  body: any,
+  fallback: {
+    price?: number;
+    salePrice?: number;
+    stock?: number;
+    measurement?: number;
+    unit?: string;
+    image?: string;
+  },
+  defaultLabel: string
+) => {
+  const incomingVariants = Array.isArray(body?.variants) ? body.variants : [];
+
+  if (incomingVariants.length === 0) {
+    if (fallback.price === undefined || fallback.stock === undefined) {
+      throw new Error('Price and stock are required when no variants are provided');
+    }
+
+    return [
+      {
+        label: defaultLabel,
+        price: Number(fallback.price),
+        salePrice: fallback.salePrice,
+        stock: Number(fallback.stock),
+        measurement: fallback.measurement ?? 1,
+        unit: fallback.unit ?? 'pcs',
+        status: fallback.stock > 0 ? 'active' : 'out_of_stock',
+        isDefault: true,
+        image: fallback.image,
+      },
+    ];
+  }
+
+  const variants = incomingVariants.map((variant: any, index: number) => {
+    const label = (variant?.label ?? `${defaultLabel} Variant ${index + 1}`).toString().trim();
+    const price = Number(
+      variant?.price ?? variant?.salePrice ?? fallback.price ?? 0
     );
+    const salePrice =
+      variant?.salePrice !== undefined && variant?.salePrice !== null
+        ? Number(variant.salePrice)
+        : undefined;
+    const stock = Number(variant?.stock ?? fallback.stock ?? 0);
+    const measurement =
+      variant?.measurement !== undefined ? Number(variant.measurement) : fallback.measurement ?? 1;
+    const unit = variant?.unit || fallback.unit || 'pcs';
+
+    if (!label) {
+      throw new Error('Variant label is required');
+    }
+    if (Number.isNaN(price) || price < 0) {
+      throw new Error(`Invalid price for variant ${label}`);
+    }
+    if (salePrice !== undefined && (Number.isNaN(salePrice) || salePrice < 0 || salePrice > price)) {
+      throw new Error(`Invalid sale price for variant ${label}`);
+    }
+    if (Number.isNaN(stock) || stock < 0) {
+      throw new Error(`Invalid stock for variant ${label}`);
+    }
+    if (Number.isNaN(measurement) || measurement <= 0) {
+      throw new Error(`Invalid measurement for variant ${label}`);
+    }
+
+    return {
+      label,
+      sku: variant?.sku,
+      barcode: variant?.barcode,
+      price,
+      salePrice,
+      stock,
+      measurement,
+      unit,
+      status: variant?.status || (stock > 0 ? 'active' : 'out_of_stock'),
+      isDefault: Boolean(variant?.isDefault),
+      image: variant?.image || fallback.image,
+      attributes: variant?.attributes || {},
+    };
+  });
+
+  // ensure only one default
+  if (!variants.some((variant: any) => variant.isDefault)) {
+    variants[0].isDefault = true;
+  } else {
+    let defaultFound = false;
+    variants.forEach((variant: any) => {
+      if (defaultFound && variant.isDefault) {
+        variant.isDefault = false;
+      } else if (variant.isDefault) {
+        defaultFound = true;
+      }
+    });
+  }
+
+  return variants;
+};
   });
 };
 
 export const createProduct = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { name, category, price, stock, status, description } = req.body;
+    const {
+      name,
+      category,
+      price,
+      salePrice,
+      stock,
+      status,
+      description,
+      measurement,
+      unit,
+      measurementIncrement,
+      shortDescription,
+      metaTitle,
+      metaDescription,
+      lowStockThreshold,
+      tags,
+    } = req.body;
+
+    if (!name || !category) {
+      res.status(400).json({ message: 'Name and category are required', success: false });
+      return;
+    }
+
     let imageUrl = '';
 
     const existingCategory = await Category.findById(category);
@@ -73,14 +192,40 @@ export const createProduct = async (req: AuthRequest, res: Response): Promise<vo
       imageUrl = req.body.image;
     }
 
+    const variants = normalizeVariants(
+      req.body,
+      {
+        price: price !== undefined ? Number(price) : undefined,
+        salePrice: salePrice !== undefined ? Number(salePrice) : undefined,
+        stock: stock !== undefined ? Number(stock) : undefined,
+        measurement: measurement !== undefined ? Number(measurement) : undefined,
+        unit,
+        image: imageUrl,
+      },
+      name
+    );
+
+    const defaultVariant = variants.find((variant) => variant.isDefault) || variants[0];
+    const aggregateStock = variants.reduce((sum, variant) => sum + (variant.stock || 0), 0);
+
     const newProduct = await Product.create({
       name,
       category,
-      price,
-      stock,
+      price: defaultVariant.salePrice || defaultVariant.price,
+      stock: aggregateStock,
+      measurement: defaultVariant.measurement ?? 1,
+      unit: defaultVariant.unit ?? 'pcs',
+      measurementIncrement: measurementIncrement ?? 0.01,
+      lowStockThreshold: lowStockThreshold ?? 5,
       status,
       description,
+      shortDescription,
+      metaTitle,
+      metaDescription,
+      tags,
       image: imageUrl,
+      variants,
+      hasVariants: variants.length > 0,
     });
 
     logger.info(`Product created: ${(newProduct as any).name} (ID: ${(newProduct as any)._id})`);
@@ -228,6 +373,7 @@ export const updateProduct = async (req: AuthRequest, res: Response): Promise<vo
       name,
       category,
       price,
+      salePrice,
       stock,
       status,
       description,
@@ -235,7 +381,19 @@ export const updateProduct = async (req: AuthRequest, res: Response): Promise<vo
       unit,
       lowStockThreshold,
       isFeatured,
+      measurementIncrement,
+      shortDescription,
+      metaTitle,
+      metaDescription,
+      tags,
+      variants: variantPayload,
     } = req.body;
+
+    const existingProduct = await Product.findById(req.params.id);
+    if (!existingProduct) {
+      res.status(404).json({ message: 'Product not found', success: false });
+      return;
+    }
 
     const updateData: any = {
       name,
@@ -248,11 +406,14 @@ export const updateProduct = async (req: AuthRequest, res: Response): Promise<vo
       unit,
       lowStockThreshold,
       isFeatured,
+      measurementIncrement,
+      shortDescription,
+      metaTitle,
+      metaDescription,
+      tags,
     };
 
-    Object.keys(updateData).forEach(
-      (key) => updateData[key] === undefined && delete updateData[key]
-    );
+    Object.keys(updateData).forEach((key) => updateData[key] === undefined && delete updateData[key]);
 
     if (category) {
       const categoryExists = await Category.findById(category);
@@ -265,9 +426,61 @@ export const updateProduct = async (req: AuthRequest, res: Response): Promise<vo
     if (req.file) {
       const uploadResult = await uploadToImageKit(req.file.buffer, req.file.originalname);
       updateData.image = uploadResult.url;
+    } else if (req.body.image) {
+      updateData.image = req.body.image;
     }
 
-    console.log('Updating product with data:', updateData);
+    if (variantPayload !== undefined) {
+      const fallbackVariant =
+        existingProduct.variants?.find((variant: any) => variant.isDefault) ||
+        existingProduct.variants?.[0];
+
+      const normalizedVariants = normalizeVariants(
+        { variants: variantPayload },
+        {
+          price:
+            price !== undefined
+              ? Number(price)
+              : fallbackVariant?.price ?? (existingProduct as any).price,
+          salePrice:
+            salePrice !== undefined
+              ? Number(salePrice)
+              : fallbackVariant?.salePrice ?? undefined,
+          stock:
+            stock !== undefined
+              ? Number(stock)
+              : fallbackVariant?.stock ?? (existingProduct as any).stock,
+          measurement:
+            measurement !== undefined
+              ? Number(measurement)
+              : fallbackVariant?.measurement ?? (existingProduct as any).measurement ?? 1,
+          unit:
+            unit ||
+            fallbackVariant?.unit ||
+            (existingProduct as any).unit ||
+            'pcs',
+          image: updateData.image || fallbackVariant?.image || (existingProduct as any).image,
+        },
+        name || (existingProduct as any).name
+      );
+
+      const defaultVariant =
+        normalizedVariants.find((variant) => variant.isDefault) || normalizedVariants[0];
+      const aggregateStock = normalizedVariants.reduce(
+        (sum, variant) => sum + (variant.stock || 0),
+        0
+      );
+
+      updateData.variants = normalizedVariants;
+      updateData.hasVariants = normalizedVariants.length > 0;
+      updateData.price = defaultVariant.salePrice || defaultVariant.price;
+      updateData.stock = aggregateStock;
+      updateData.measurement = defaultVariant.measurement ?? 1;
+      updateData.unit = defaultVariant.unit ?? 'pcs';
+    } else if (existingProduct.hasVariants) {
+      // Keep hasVariants true if product already has variants and they weren't updated
+      updateData.hasVariants = true;
+    }
 
     const updatedProduct = await Product.findByIdAndUpdate(req.params.id, updateData, {
       new: true,

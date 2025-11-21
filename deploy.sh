@@ -78,7 +78,7 @@ pm2 delete prokrishi-backend 2>/dev/null || true
 
 # Start application with PM2
 echo -e "${GREEN}🚀 Starting application with PM2...${NC}"
-pm2 start ecosystem.config.js --env production
+pm2 start ecosystem.config.cjs --env production
 
 # Save PM2 process list
 pm2 save

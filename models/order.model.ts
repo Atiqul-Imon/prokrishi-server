@@ -1,6 +1,20 @@
 import mongoose, { Schema, Model } from 'mongoose';
 import { IOrder, IOrderItem } from '../types/index.js';
 
+const variantSnapshotSchema = new Schema(
+  {
+    variantId: { type: Schema.Types.ObjectId },
+    label: { type: String },
+    sku: { type: String },
+    price: { type: Number },
+    salePrice: { type: Number },
+    measurement: { type: Number },
+    unit: { type: String },
+    image: { type: String },
+  },
+  { _id: false }
+);
+
 const orderItemSchema = new Schema<IOrderItem>({
   product: {
     type: Schema.Types.ObjectId,
@@ -10,6 +24,7 @@ const orderItemSchema = new Schema<IOrderItem>({
   name: { type: String, required: true },
   quantity: { type: Number, required: true },
   price: { type: Number, required: true },
+  variant: { type: variantSnapshotSchema },
 });
 
 const orderSchema = new Schema<IOrder>(

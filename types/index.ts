@@ -33,6 +33,35 @@ export interface IUser extends Document {
 }
 
 // Product Interface
+export interface IProductVariant {
+  _id: Types.ObjectId;
+  label: string;
+  sku?: string;
+  barcode?: string;
+  price: number;
+  salePrice?: number;
+  stock: number;
+  measurement?: number;
+  unit?: string;
+  status: 'active' | 'inactive' | 'out_of_stock';
+  isDefault?: boolean;
+  image?: string;
+  attributes?: Record<string, string>;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+export interface IVariantSnapshot {
+  variantId: Types.ObjectId;
+  label: string;
+  sku?: string;
+  price: number;
+  salePrice?: number;
+  measurement?: number;
+  unit?: string;
+  image?: string;
+}
+
 export interface IProduct extends Document {
   _id: Types.ObjectId;
   name: string;
@@ -60,6 +89,15 @@ export interface IProduct extends Document {
   metaDescription?: string;
   slug?: string;
   lastViewedAt?: Date;
+  variants?: IProductVariant[];
+  hasVariants?: boolean;
+  defaultVariantId?: Types.ObjectId;
+  variantSummary?: {
+    totalStock: number;
+    minPrice: number;
+    maxPrice: number;
+    activeCount: number;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -79,10 +117,11 @@ export interface ICategory extends Document {
 
 // Cart Item Interface
 export interface ICartItem {
+  _id?: Types.ObjectId;
   product: Types.ObjectId | IProduct;
   quantity: number;
   price?: number;
-  _id?: Types.ObjectId;
+  variant?: IVariantSnapshot;
 }
 
 // Cart Interface
@@ -100,6 +139,7 @@ export interface IOrderItem {
   name: string;
   quantity: number;
   price: number;
+  variant?: IVariantSnapshot;
 }
 
 // Shipping Address Interface
@@ -164,6 +204,8 @@ export interface AuthRequest extends Request {
     productId: any;
     quantity: number;
     originalStock: number;
+    variantId?: Types.ObjectId;
+    variantLabel?: string;
   }>;
 }
 

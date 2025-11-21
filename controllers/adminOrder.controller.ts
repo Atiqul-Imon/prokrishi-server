@@ -1,8 +1,8 @@
 import { Response } from 'express';
 import Order from '../models/order.model.js';
-import Product from '../models/product.model.js';
 import logger, { logBusiness, logPerformance } from '../services/logger.js';
 import { AuthRequest } from '../types/index.js';
+import { restoreProductInventory } from '../services/inventory.service.js';
 
 export const getAllOrders = async (req: AuthRequest, res: Response): Promise<void> => {
   const startTime = Date.now();
@@ -239,7 +239,11 @@ export const updateOrderStatus = async (req: AuthRequest, res: Response): Promis
 
     if (status === 'cancelled' && oldStatus !== 'cancelled') {
       for (const item of (order as any).orderItems) {
-        await Product.findByIdAndUpdate(item.product, { $inc: { stock: item.quantity } });
+        await restoreProductInventory({
+          productId: item.product,
+          quantity: item.quantity,
+          variantSnapshot: item.variant,
+        });
       }
     }
 
@@ -403,7 +407,11 @@ export const deleteOrder = async (req: AuthRequest, res: Response): Promise<void
 
     if ((order as any).status !== 'cancelled') {
       for (const item of (order as any).orderItems) {
-        await Product.findByIdAndUpdate(item.product, { $inc: { stock: item.quantity } });
+        await restoreProductInventory({
+          productId: item.product,
+          quantity: item.quantity,
+          variantSnapshot: item.variant,
+        });
       }
     }
 

@@ -1,6 +1,66 @@
 import mongoose, { Schema, Model } from 'mongoose';
 import { IProduct } from '../types/index.js';
 
+const productVariantSchema = new Schema(
+  {
+    label: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    sku: {
+      type: String,
+      trim: true,
+    },
+    barcode: {
+      type: String,
+      trim: true,
+    },
+    price: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    salePrice: {
+      type: Number,
+      min: 0,
+    },
+    stock: {
+      type: Number,
+      required: true,
+      min: 0,
+      default: 0,
+    },
+    measurement: {
+      type: Number,
+      min: 0.01,
+    },
+    unit: {
+      type: String,
+      enum: ['pcs', 'kg', 'g', 'l', 'ml'],
+    },
+    status: {
+      type: String,
+      enum: ['active', 'inactive', 'out_of_stock'],
+      default: 'active',
+    },
+    isDefault: {
+      type: Boolean,
+      default: false,
+    },
+    image: {
+      type: String,
+      trim: true,
+    },
+    attributes: {
+      type: Map,
+      of: String,
+      default: {},
+    },
+  },
+  { timestamps: true }
+);
+
 const productSchema = new Schema<IProduct>(
   {
     name: {
@@ -108,6 +168,24 @@ const productSchema = new Schema<IProduct>(
         trim: true,
       },
     ],
+    variants: {
+      type: [productVariantSchema],
+      default: [],
+    },
+    hasVariants: {
+      type: Boolean,
+      default: false,
+    },
+    defaultVariantId: {
+      type: Schema.Types.ObjectId,
+      default: null,
+    },
+    variantSummary: {
+      totalStock: { type: Number, default: 0 },
+      minPrice: { type: Number, default: 0 },
+      maxPrice: { type: Number, default: 0 },
+      activeCount: { type: Number, default: 0 },
+    },
     rating: {
       type: Number,
       default: 0,
@@ -147,6 +225,70 @@ productSchema.virtual('displayMeasurement').get(function (this: IProduct) {
 // Virtual field for price per unit
 productSchema.virtual('pricePerUnit').get(function (this: IProduct) {
   return ((this as any).price / (this as any).measurement) as number;
+});
+
+productVariantSchema.index({ sku: 1 }, { unique: false });
+productSchema.index({ 'variants.sku': 1 });
+productSchema.index({ hasVariants: 1 });
+
+// Pre-validate hook to keep variant aggregates & backward compatibility in sync
+productSchema.pre('validate', function (this: IProduct, next) {
+  try {
+    const doc = this as any;
+    const variants = Array.isArray(doc.variants) ? doc.variants : [];
+
+    if (variants.length > 0) {
+      doc.hasVariants = true;
+
+      // ensure only one default variant
+      let defaultVariant = variants.find((variant: any) => variant.isDefault);
+      if (!defaultVariant) {
+        variants[0].isDefault = true;
+        defaultVariant = variants[0];
+      } else {
+        variants.forEach((variant: any) => {
+          variant.isDefault = variant._id?.equals?.((defaultVariant as any)._id) || variant === defaultVariant;
+        });
+      }
+
+      doc.defaultVariantId = (defaultVariant as any)?._id || defaultVariant?._id;
+
+      const totalStock = variants.reduce((sum: number, variant: any) => sum + (variant.stock || 0), 0);
+      const prices = variants
+        .map((variant: any) => variant.salePrice || variant.price || 0)
+        .filter((price: number) => price >= 0);
+      const minPrice = prices.length ? Math.min(...prices) : doc.price || 0;
+      const maxPrice = prices.length ? Math.max(...prices) : doc.price || 0;
+      const activeCount = variants.filter((variant: any) => {
+        if (variant.status === 'inactive') return false;
+        if (variant.status === 'out_of_stock') {
+          return variant.stock > 0;
+        }
+        return true;
+      }).length;
+
+      doc.variantSummary = {
+        totalStock,
+        minPrice,
+        maxPrice,
+        activeCount,
+      };
+
+      // ensure legacy scalar fields stay meaningful
+      doc.price = defaultVariant.salePrice || defaultVariant.price || doc.price;
+      doc.stock = totalStock;
+      doc.measurement = defaultVariant.measurement || doc.measurement || 1;
+      doc.unit = defaultVariant.unit || doc.unit || 'pcs';
+    } else {
+      doc.hasVariants = false;
+      doc.defaultVariantId = null;
+      doc.variantSummary = undefined;
+    }
+  } catch (error) {
+    return next(error as Error);
+  }
+
+  next();
 });
 
 // Pre-save hook to generate SKU and slug for new products

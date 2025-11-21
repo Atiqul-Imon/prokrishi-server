@@ -5,6 +5,7 @@ import Product from '../models/product.model.js';
 import cacheService from '../services/cache.js';
 import logger, { logBusiness, logPerformance } from '../services/logger.js';
 import { AuthRequest, IOrder } from '../types/index.js';
+import { restoreProductInventory } from '../services/inventory.service.js';
 
 export const createOrder = async (req: AuthRequest, res: Response): Promise<void> => {
   const startTime = Date.now();
@@ -79,48 +80,119 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
             throw new Error(`Product not found: ${item.name}`);
           }
 
-          if ((product as any).stock < item.quantity) {
-            throw new Error(`Insufficient stock for ${item.name}. Available: ${(product as any).stock}`);
-          }
-
           if ((product as any).status !== 'active') {
             throw new Error(`Product ${item.name} is not available`);
           }
 
-          const updatedProduct = await Product.findByIdAndUpdate(
-            item.product,
-            {
-              $inc: {
-                stock: -item.quantity,
-                sold: item.quantity,
-              },
-            },
-            {
-              new: true,
-              session,
-              runValidators: true,
+          const variantIdFromRequest =
+            item.variantId ||
+            item.variant?._id ||
+            item.variant?.variantId ||
+            item.variantId;
+
+          let variantSnapshot: any = null;
+          let unitPrice = item.price;
+          let lineItemName = item.name || (product as any).name;
+          let originalStockValue = (product as any).stock;
+
+          if ((product as any).hasVariants && (product as any).variants?.length) {
+            const variants = (product as any).variants;
+            let matchedVariant = variantIdFromRequest
+              ? variants.id?.(variantIdFromRequest) ||
+                variants.find((variant: any) => variant._id.equals(variantIdFromRequest))
+              : variants.find((variant: any) => variant.isDefault);
+
+            if (!matchedVariant) {
+              throw new Error(`Variant not found for ${item.name}`);
             }
-          );
 
-          if ((updatedProduct as any)?.stock < 0) {
-            throw new Error(`Stock would go negative for ${item.name}. Available: ${(product as any).stock}`);
-          }
+            if (
+              matchedVariant.status === 'inactive' ||
+              matchedVariant.stock === undefined ||
+              matchedVariant.stock < item.quantity
+            ) {
+              throw new Error(
+                `Insufficient stock for ${item.name} (${matchedVariant.label}). Available: ${matchedVariant.stock}`
+              );
+            }
 
-          const itemTotal = item.price * item.quantity;
-          calculatedTotal += itemTotal;
+            originalStockValue = matchedVariant.stock;
 
-          validatedItems.push({
-            product: (product as any)._id,
-            name: item.name,
-            quantity: item.quantity,
-            price: item.price,
-          });
+            matchedVariant.stock -= item.quantity;
+            (product as any).sold = ((product as any).sold || 0) + item.quantity;
+            (product as any).stock = (product as any).variants.reduce(
+              (sum: number, variant: any) => sum + (variant.stock || 0),
+              0
+            );
+            product.markModified('variants');
+            await product.save({ session, validateModifiedOnly: true });
+
+            unitPrice = matchedVariant.salePrice || matchedVariant.price;
+            lineItemName = `${(product as any).name} (${matchedVariant.label})`;
+            variantSnapshot = {
+              variantId: matchedVariant._id,
+              label: matchedVariant.label,
+              sku: matchedVariant.sku,
+              price: matchedVariant.price,
+              salePrice: matchedVariant.salePrice,
+              measurement: matchedVariant.measurement,
+              unit: matchedVariant.unit,
+              image: matchedVariant.image || (product as any).image,
+            };
+
+            validatedItems.push({
+              product: (product as any)._id,
+              name: lineItemName,
+              quantity: item.quantity,
+              price: unitPrice,
+              variant: variantSnapshot,
+            });
+
+            productUpdates.push({
+              productId: (product as any)._id,
+              quantity: item.quantity,
+              originalStock: originalStockValue,
+              variantId: matchedVariant._id,
+              variantLabel: matchedVariant.label,
+            });
+          } else {
+            if ((product as any).stock < item.quantity) {
+              throw new Error(
+                `Insufficient stock for ${item.name}. Available: ${(product as any).stock}`
+              );
+            }
+
+            originalStockValue = (product as any).stock;
+            (product as any).stock -= item.quantity;
+            (product as any).sold = ((product as any).sold || 0) + item.quantity;
+            await product.save({ session, validateModifiedOnly: true });
+
+            unitPrice = (product as any).price;
+            lineItemName = item.name || (product as any).name;
+
+            validatedItems.push({
+              product: (product as any)._id,
+              name: lineItemName,
+              quantity: item.quantity,
+              price: unitPrice,
+            });
 
           productUpdates.push({
             productId: (product as any)._id,
             quantity: item.quantity,
-            originalStock: (product as any).stock,
+            originalStock: originalStockValue,
+            variantId: variantSnapshot?.variantId,
+            variantLabel: variantSnapshot?.label,
           });
+            productUpdates.push({
+              productId: (product as any)._id,
+              quantity: item.quantity,
+              originalStock: originalStockValue,
+            });
+          }
+
+          const itemTotal = unitPrice * item.quantity;
+          calculatedTotal += itemTotal;
         }
 
         if (Math.abs(calculatedTotal - totalPrice) > 0.01) {
@@ -566,16 +638,12 @@ export const cancelOrder = async (req: AuthRequest, res: Response): Promise<void
         await order.save({ session });
 
         for (const item of (order as any).orderItems) {
-          await Product.findByIdAndUpdate(
-            item.product,
-            {
-              $inc: {
-                stock: item.quantity,
-                sold: -item.quantity,
-              },
-            },
-            { session }
-          );
+          await restoreProductInventory({
+            productId: item.product,
+            quantity: item.quantity,
+            variantSnapshot: item.variant,
+            session,
+          });
         }
       });
 
