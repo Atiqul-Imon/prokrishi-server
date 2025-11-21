@@ -72,6 +72,8 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
           productId: any;
           quantity: number;
           originalStock: number;
+          variantId?: any;
+          variantLabel?: string;
         }> = [];
 
         for (const item of orderItems) {
@@ -177,17 +179,12 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
               price: unitPrice,
             });
 
-          productUpdates.push({
-            productId: (product as any)._id,
-            quantity: item.quantity,
-            originalStock: originalStockValue,
-            variantId: variantSnapshot?.variantId,
-            variantLabel: variantSnapshot?.label,
-          });
             productUpdates.push({
               productId: (product as any)._id,
               quantity: item.quantity,
               originalStock: originalStockValue,
+              variantId: variantSnapshot?.variantId,
+              variantLabel: variantSnapshot?.label,
             });
           }
 

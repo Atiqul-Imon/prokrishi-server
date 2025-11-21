@@ -51,8 +51,11 @@ const uploadToImageKit = (
           resolve(result);
         }
       }
-);
+    );
+  });
+};
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const normalizeVariants = (
   body: any,
   fallback: {
@@ -149,8 +152,6 @@ const normalizeVariants = (
 
   return variants;
 };
-  });
-};
 
 export const createProduct = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -205,8 +206,8 @@ export const createProduct = async (req: AuthRequest, res: Response): Promise<vo
       name
     );
 
-    const defaultVariant = variants.find((variant) => variant.isDefault) || variants[0];
-    const aggregateStock = variants.reduce((sum, variant) => sum + (variant.stock || 0), 0);
+    const defaultVariant = variants.find((variant: any) => variant.isDefault) || variants[0];
+    const aggregateStock = variants.reduce((sum: number, variant: any) => sum + (variant.stock || 0), 0);
 
     const newProduct = await Product.create({
       name,
@@ -465,9 +466,9 @@ export const updateProduct = async (req: AuthRequest, res: Response): Promise<vo
       );
 
       const defaultVariant =
-        normalizedVariants.find((variant) => variant.isDefault) || normalizedVariants[0];
+        normalizedVariants.find((variant: any) => variant.isDefault) || normalizedVariants[0];
       const aggregateStock = normalizedVariants.reduce(
-        (sum, variant) => sum + (variant.stock || 0),
+        (sum: number, variant: any) => sum + (variant.stock || 0),
         0
       );
 
