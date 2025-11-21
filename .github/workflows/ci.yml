@@ -19,7 +19,9 @@ jobs:
       with:
         node-version: '20'
         cache: 'npm'
-        cache-dependency-path: backend/package-lock.json
+        # We run all subsequent commands inside ./backend, so the cache path
+        # should be relative to that working directory.
+        cache-dependency-path: package-lock.json
 
     - name: Install dependencies
       working-directory: ./backend
