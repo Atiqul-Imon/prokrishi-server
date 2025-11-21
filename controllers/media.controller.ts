@@ -45,9 +45,46 @@ export const getAllMedia = async (req: AuthRequest, res: Response): Promise<void
 
     // Fetch all files from ImageKit (ImageKit max limit is 1000)
     // We'll fetch in batches if needed, but for now use max limit
-    const allFilesResult: any = await imagekit.listFiles({
-      limit: 1000, // Maximum allowed by ImageKit
-    });
+    let allFilesResult: any;
+    try {
+      const response = await imagekit.listFiles({
+        limit: 1000, // Maximum allowed by ImageKit
+      });
+      
+      // ImageKit may return an array directly or an object with files property
+      if (Array.isArray(response)) {
+        allFilesResult = response;
+      } else if (response && typeof response === 'object' && 'files' in response) {
+        allFilesResult = (response as any).files || [];
+      } else {
+        allFilesResult = [];
+      }
+      
+      // Ensure allFilesResult is an array
+      if (!Array.isArray(allFilesResult)) {
+        logger.error('ImageKit listFiles returned non-array:', {
+          type: typeof allFilesResult,
+          response: JSON.stringify(response).substring(0, 200),
+        });
+        throw new Error('Invalid response from ImageKit API - expected array');
+      }
+      
+      logger.info(`ImageKit returned ${allFilesResult.length} files`);
+    } catch (imagekitError: any) {
+      logger.error('ImageKit listFiles error:', {
+        message: imagekitError.message,
+        stack: imagekitError.stack,
+        name: imagekitError.name,
+      });
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch files from ImageKit',
+        error: process.env.NODE_ENV === 'production'
+          ? 'ImageKit service error'
+          : imagekitError.message || 'Unknown ImageKit error',
+      });
+      return;
+    }
 
     // Filter files to only include Prokrishi-related folders
     let filteredFiles = allFilesResult.filter((file: any) => {
@@ -177,11 +214,17 @@ export const getAllMedia = async (req: AuthRequest, res: Response): Promise<void
       pagination,
     });
   } catch (error: any) {
-    logger.error('Get media files error:', error);
+    logger.error('Get media files error:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+    });
     res.status(500).json({
       success: false,
       message: 'Failed to fetch media files',
-      error: error.message,
+      error: process.env.NODE_ENV === 'production' 
+        ? 'Internal server error' 
+        : error.message,
     });
   }
 };
@@ -373,9 +416,38 @@ export const getMediaStats = async (_req: AuthRequest, res: Response): Promise<v
     }
 
     // Fetch all files from ImageKit (ImageKit max limit is 1000)
-    const allFilesResult = await imagekit.listFiles({
-      limit: 1000, // Maximum allowed by ImageKit
-    });
+    let allFilesResult: any;
+    try {
+      const response = await imagekit.listFiles({
+        limit: 1000, // Maximum allowed by ImageKit
+      });
+      
+      // ImageKit may return an array directly or an object with files property
+      if (Array.isArray(response)) {
+        allFilesResult = response;
+      } else if (response && typeof response === 'object' && 'files' in response) {
+        allFilesResult = (response as any).files || [];
+      } else {
+        allFilesResult = [];
+      }
+      
+      if (!Array.isArray(allFilesResult)) {
+        throw new Error('Invalid response from ImageKit API - expected array');
+      }
+    } catch (imagekitError: any) {
+      logger.error('ImageKit listFiles error in getMediaStats:', {
+        message: imagekitError.message,
+        stack: imagekitError.stack,
+      });
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch media stats',
+        error: process.env.NODE_ENV === 'production'
+          ? 'ImageKit service error'
+          : imagekitError.message || 'Unknown ImageKit error',
+      });
+      return;
+    }
 
     // Filter to only Prokrishi-related files
     const allFiles = allFilesResult.filter((file: any) => {
@@ -409,11 +481,17 @@ export const getMediaStats = async (_req: AuthRequest, res: Response): Promise<v
       stats,
     });
   } catch (error: any) {
-    logger.error('Get media stats error:', error);
+    logger.error('Get media stats error:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+    });
     res.status(500).json({
       success: false,
       message: 'Failed to get media statistics',
-      error: error.message,
+      error: process.env.NODE_ENV === 'production'
+        ? 'Internal server error'
+        : error.message,
     });
   }
 };
