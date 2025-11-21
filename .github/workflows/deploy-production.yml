@@ -46,39 +46,26 @@ jobs:
         echo "📍 Deployment path: $DEPLOY_PATH"
         echo "📍 Repository URL: $REPO_URL"
         
-        # Extract parent directory (where the repo should be)
-        PARENT_DIR="$(dirname "$DEPLOY_PATH")"
-        REPO_NAME="$(basename "$PARENT_DIR")"
-        
-        echo "📍 Parent directory: $PARENT_DIR"
-        echo "📍 Repository name: $REPO_NAME"
-        
-        # Check if parent directory exists and is a git repo
-        if [ ! -d "$PARENT_DIR" ] || [ ! -d "$PARENT_DIR/.git" ]; then
-          echo "📦 Repository not found, cloning..."
-          # Create parent directory if needed
-          mkdir -p "$(dirname "$PARENT_DIR")"
-          # Clone the repository
-          cd "$(dirname "$PARENT_DIR")"
-          git clone "$REPO_URL" "$REPO_NAME" || { echo "❌ Git clone failed!"; exit 1; }
-        fi
-        
-        # Now navigate to the backend directory
+        # Check if directory exists
         if [ ! -d "$DEPLOY_PATH" ]; then
-          echo "❌ Error: Backend directory $DEPLOY_PATH does not exist after clone!"
-          echo "📋 Contents of $PARENT_DIR:"
-          ls -la "$PARENT_DIR" || true
+          echo "❌ Error: Directory $DEPLOY_PATH does not exist!"
           exit 1
         fi
         
         cd "$DEPLOY_PATH"
         
+        # Check if it's a git repository
+        if [ ! -d ".git" ]; then
+          echo "❌ Error: $DEPLOY_PATH is not a git repository!"
+          echo "📋 Contents of $DEPLOY_PATH:"
+          ls -la || true
+          exit 1
+        fi
+        
         # Pull latest changes
         echo "📦 Pulling latest changes from GitHub..."
-        cd "$PARENT_DIR"
         git fetch origin || { echo "⚠️  Git fetch failed, continuing..."; }
         git reset --hard origin/main || { echo "❌ Git reset failed!"; exit 1; }
-        cd "$DEPLOY_PATH"
         
         echo "📦 Installing/updating dependencies..."
         npm ci --production || { echo "❌ npm install failed!"; exit 1; }
@@ -87,10 +74,12 @@ jobs:
         if pm2 list | grep -q "prokrishi-backend"; then
           pm2 restart prokrishi-backend
         else
-          if [ -f "ecosystem.config.js" ]; then
+          if [ -f "ecosystem.config.cjs" ]; then
+            pm2 start ecosystem.config.cjs --env production
+          elif [ -f "ecosystem.config.js" ]; then
             pm2 start ecosystem.config.js --env production
           else
-            echo "⚠️  ecosystem.config.js not found, trying to start with npm..."
+            echo "⚠️  ecosystem.config not found, trying to start with npm..."
             pm2 start npm --name "prokrishi-backend" -- start
           fi
         fi
