@@ -43,50 +43,123 @@ export const getAllMedia = async (req: AuthRequest, res: Response): Promise<void
       type = 'all',
     } = req.query;
 
-    const searchParams: any = {
-      path: '/prokrishi_media/',
-      sort: sort === 'createdAt' ? 'A' : 'D',
-      limit: parseInt(limit as string),
-      skip: (parseInt(page as string) - 1) * parseInt(limit as string),
-    };
+    // Fetch all files from ImageKit (ImageKit max limit is 1000)
+    // We'll fetch in batches if needed, but for now use max limit
+    const allFilesResult: any = await imagekit.listFiles({
+      limit: 1000, // Maximum allowed by ImageKit
+    });
 
-    if (search) {
-      searchParams.searchQuery = search;
+    // Filter files to only include Prokrishi-related folders
+    let filteredFiles = allFilesResult.filter((file: any) => {
+      const filePath = file.filePath || '';
+      return filePath.includes('/prokrishi') || 
+             filePath.includes('/prokrishi_media') ||
+             filePath.includes('/prokrishi/products') ||
+             filePath.includes('/prokrishi/categories');
+    });
+
+    // Apply search filter if provided
+    if (search && typeof search === 'string') {
+      const searchLower = search.toLowerCase();
+      filteredFiles = filteredFiles.filter((file: any) => 
+        file.name?.toLowerCase().includes(searchLower) ||
+        file.filePath?.toLowerCase().includes(searchLower)
+      );
     }
 
+    // Apply type filter if provided
     if (type !== 'all') {
       if (type === 'image') {
-        searchParams.tags = ['image'];
+        filteredFiles = filteredFiles.filter((file: any) => 
+          file.fileType === 'image' || 
+          file.format?.toLowerCase().match(/jpg|jpeg|png|gif|webp|svg/)
+        );
       } else if (type === 'video') {
-        searchParams.tags = ['video'];
+        filteredFiles = filteredFiles.filter((file: any) => 
+          file.fileType === 'video' || 
+          file.format?.toLowerCase().match(/mp4|avi|mov|wmv|flv|webm/)
+        );
       } else if (type === 'document') {
-        searchParams.tags = ['document'];
+        filteredFiles = filteredFiles.filter((file: any) => 
+          file.fileType === 'non-image' && 
+          !file.format?.toLowerCase().match(/mp4|avi|mov|wmv|flv|webm/)
+        );
       }
     }
 
-    const result: any = await imagekit.listFiles(searchParams);
+    const result = filteredFiles;
 
-    const mediaFiles = result.map((file: any) => ({
-      id: file.fileId,
-      name: file.name,
-      url: file.url,
-      thumbnailUrl: file.thumbnailUrl || file.url,
-      size: file.size,
-      width: file.width,
-      height: file.height,
-      format: file.format,
-      tags: file.tags || [],
-      createdAt: file.createdAt,
-      updatedAt: file.updatedAt,
-      isPrivateFile: file.isPrivateFile,
-      customMetadata: file.customMetadata || {},
-    }));
+    // Map and sort files based on sort parameter
+    let mediaFiles = result.map((file: any) => {
+      // Clean up file name - extract from filePath if name is garbled
+      let fileName = file.name;
+      if (!fileName || fileName.includes('à__') || fileName.match(/^[à_]+/)) {
+        // If name is garbled, try to extract from filePath
+        if (file.filePath) {
+          const pathParts = file.filePath.split('/');
+          fileName = pathParts[pathParts.length - 1] || file.fileId;
+        } else if (file.url) {
+          // Extract from URL
+          try {
+            const urlParts = new URL(file.url).pathname.split('/');
+            fileName = decodeURIComponent(urlParts[urlParts.length - 1]) || file.fileId;
+          } catch {
+            fileName = file.fileId;
+          }
+        } else {
+          fileName = file.fileId;
+        }
+      }
+      
+      // Decode URI component if needed
+      try {
+        fileName = decodeURIComponent(fileName);
+      } catch {
+        // If decode fails, use as is
+      }
 
-    const totalResult = await imagekit.listFiles({
-      path: '/prokrishi_media/',
-      limit: 1,
+      return {
+        id: file.fileId,
+        name: fileName,
+        url: file.url,
+        thumbnailUrl: file.thumbnailUrl || file.url,
+        size: file.size,
+        width: file.width,
+        height: file.height,
+        format: file.format || file.name?.split('.').pop()?.toLowerCase() || 'unknown',
+        tags: file.tags || [],
+        createdAt: file.createdAt,
+        updatedAt: file.updatedAt,
+        isPrivateFile: file.isPrivateFile,
+        customMetadata: file.customMetadata || {},
+      };
     });
-    const totalFiles = totalResult.length > 0 ? (totalResult[0] as any).totalCount || 0 : 0;
+
+    // Sort files based on sort parameter and order
+    const order = req.query.order === 'asc' ? 1 : -1;
+    if (sort === 'createdAt') {
+      mediaFiles.sort((a: any, b: any) => {
+        const dateA = new Date(a.createdAt).getTime();
+        const dateB = new Date(b.createdAt).getTime();
+        return (dateA - dateB) * order;
+      });
+    } else if (sort === 'name') {
+      mediaFiles.sort((a: any, b: any) => {
+        return a.name.localeCompare(b.name) * order;
+      });
+    } else if (sort === 'size') {
+      mediaFiles.sort((a: any, b: any) => {
+        return (a.size - b.size) * order;
+      });
+    }
+
+    // Apply pagination after sorting
+    const startIndex = (parseInt(page as string) - 1) * parseInt(limit as string);
+    const endIndex = startIndex + parseInt(limit as string);
+    mediaFiles = mediaFiles.slice(startIndex, endIndex);
+
+    // Total files is the filtered result length
+    const totalFiles = result.length;
 
     const pagination = {
       currentPage: parseInt(page as string),
@@ -299,9 +372,18 @@ export const getMediaStats = async (_req: AuthRequest, res: Response): Promise<v
       return;
     }
 
-    const allFiles = await imagekit.listFiles({
-      path: '/prokrishi_media/',
-      limit: 1000,
+    // Fetch all files from ImageKit (ImageKit max limit is 1000)
+    const allFilesResult = await imagekit.listFiles({
+      limit: 1000, // Maximum allowed by ImageKit
+    });
+
+    // Filter to only Prokrishi-related files
+    const allFiles = allFilesResult.filter((file: any) => {
+      const filePath = file.filePath || '';
+      return filePath.includes('/prokrishi') || 
+             filePath.includes('/prokrishi_media') ||
+             filePath.includes('/prokrishi/products') ||
+             filePath.includes('/prokrishi/categories');
     });
 
     const stats = {
