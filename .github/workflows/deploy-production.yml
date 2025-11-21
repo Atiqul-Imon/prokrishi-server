@@ -73,21 +73,39 @@ jobs:
         echo "🔨 Building TypeScript..."
         npm run build || { echo "❌ TypeScript build failed!"; exit 1; }
         
+        # Verify build output exists
+        if [ ! -d "dist" ] || [ ! -f "dist/index.js" ]; then
+          echo "❌ Build output not found! dist/index.js is missing."
+          exit 1
+        fi
+        
+        echo "✅ Build successful. dist/index.js exists."
+        
         echo "📦 Installing production dependencies only..."
         npm ci --production || { echo "⚠️  Production install failed, but build succeeded"; }
         
-        echo "🔄 Restarting application with PM2..."
-        if pm2 list | grep -q "prokrishi-backend"; then
-          pm2 restart prokrishi-backend
+        echo "🔄 Stopping existing PM2 process..."
+        pm2 stop prokrishi-backend 2>/dev/null || echo "No existing process to stop"
+        pm2 delete prokrishi-backend 2>/dev/null || echo "No existing process to delete"
+        
+        echo "🔄 Starting application with PM2..."
+        if [ -f "ecosystem.config.cjs" ]; then
+          pm2 start ecosystem.config.cjs --env production
+        elif [ -f "ecosystem.config.js" ]; then
+          pm2 start ecosystem.config.js --env production
         else
-          if [ -f "ecosystem.config.cjs" ]; then
-            pm2 start ecosystem.config.cjs --env production
-          elif [ -f "ecosystem.config.js" ]; then
-            pm2 start ecosystem.config.js --env production
-          else
-            echo "⚠️  ecosystem.config not found, trying to start with npm..."
-            pm2 start npm --name "prokrishi-backend" -- start
-          fi
+          echo "⚠️  ecosystem.config not found, trying to start with npm..."
+          pm2 start npm --name "prokrishi-backend" -- start
+        fi
+        
+        # Wait a moment for the process to start
+        sleep 2
+        
+        # Verify PM2 process is running
+        if ! pm2 list | grep -q "prokrishi-backend.*online"; then
+          echo "❌ PM2 process failed to start!"
+          pm2 logs prokrishi-backend --lines 20 --nostream
+          exit 1
         fi
         
         echo "💾 Saving PM2 process list..."
