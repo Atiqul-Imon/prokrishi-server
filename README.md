@@ -3,7 +3,7 @@
 Modern e-commerce backend API built with Node.js, Express, and MongoDB.
 
 > **Deployment:** Automated deployment via GitHub Actions to Digital Ocean droplet.  
-> **Last Updated:** $(date +%Y-%m-%d)
+> **Status:** Active
 
 ## 🚀 Quick Start
 
