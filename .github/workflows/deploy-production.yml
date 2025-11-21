@@ -67,8 +67,14 @@ jobs:
         git fetch origin || { echo "⚠️  Git fetch failed, continuing..."; }
         git reset --hard origin/main || { echo "❌ Git reset failed!"; exit 1; }
         
-        echo "📦 Installing/updating dependencies..."
-        npm ci --production || { echo "❌ npm install failed!"; exit 1; }
+        echo "📦 Installing dependencies (including devDependencies for build)..."
+        npm ci || { echo "❌ npm install failed!"; exit 1; }
+        
+        echo "🔨 Building TypeScript..."
+        npm run build || { echo "❌ TypeScript build failed!"; exit 1; }
+        
+        echo "📦 Installing production dependencies only..."
+        npm ci --production || { echo "⚠️  Production install failed, but build succeeded"; }
         
         echo "🔄 Restarting application with PM2..."
         if pm2 list | grep -q "prokrishi-backend"; then
