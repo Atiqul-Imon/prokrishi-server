@@ -224,10 +224,10 @@ export const createFishProduct = async (req: AuthRequest, res: Response): Promis
       category,
       description,
       shortDescription,
-      sizeCategories,
+      sizeCategories: sizeCategoriesRaw,
       status = 'active',
       isFeatured = false,
-      tags,
+      tags: tagsRaw,
       metaTitle,
       metaDescription,
     } = req.body;
@@ -235,6 +235,35 @@ export const createFishProduct = async (req: AuthRequest, res: Response): Promis
     if (!name || !category) {
       res.status(400).json({ success: false, message: 'Name and category are required' });
       return;
+    }
+
+    // Parse JSON strings from FormData
+    let sizeCategories: any[] = [];
+    try {
+      if (typeof sizeCategoriesRaw === 'string') {
+        sizeCategories = JSON.parse(sizeCategoriesRaw);
+      } else if (Array.isArray(sizeCategoriesRaw)) {
+        sizeCategories = sizeCategoriesRaw;
+      }
+    } catch (error) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid sizeCategories format',
+      });
+      return;
+    }
+
+    let tags: string[] = [];
+    if (tagsRaw) {
+      try {
+        if (typeof tagsRaw === 'string') {
+          tags = JSON.parse(tagsRaw);
+        } else if (Array.isArray(tagsRaw)) {
+          tags = tagsRaw;
+        }
+      } catch (error) {
+        // Tags parsing failed, ignore
+      }
     }
 
     if (!sizeCategories || !Array.isArray(sizeCategories) || sizeCategories.length === 0) {
@@ -335,10 +364,10 @@ export const updateFishProduct = async (req: AuthRequest, res: Response): Promis
       category,
       description,
       shortDescription,
-      sizeCategories,
+      sizeCategories: sizeCategoriesRaw,
       status,
       isFeatured,
-      tags,
+      tags: tagsRaw,
       metaTitle,
       metaDescription,
     } = req.body;
@@ -377,12 +406,42 @@ export const updateFishProduct = async (req: AuthRequest, res: Response): Promis
       (fishProduct as any).shortDescription = shortDescription || '';
     if (status) (fishProduct as any).status = status;
     if (isFeatured !== undefined) (fishProduct as any).isFeatured = isFeatured;
-    if (tags) (fishProduct as any).tags = tags;
+    
+    // Parse tags if provided
+    if (tagsRaw !== undefined) {
+      let tags: string[] = [];
+      try {
+        if (typeof tagsRaw === 'string') {
+          tags = JSON.parse(tagsRaw);
+        } else if (Array.isArray(tagsRaw)) {
+          tags = tagsRaw;
+        }
+      } catch (error) {
+        // Tags parsing failed, ignore
+      }
+      (fishProduct as any).tags = tags;
+    }
+    
     if (metaTitle !== undefined) (fishProduct as any).metaTitle = metaTitle?.trim();
     if (metaDescription !== undefined) (fishProduct as any).metaDescription = metaDescription?.trim();
 
-    // Update size categories if provided
-    if (sizeCategories && Array.isArray(sizeCategories)) {
+    // Parse and update size categories if provided
+    if (sizeCategoriesRaw !== undefined) {
+      let sizeCategories: any[] = [];
+      try {
+        if (typeof sizeCategoriesRaw === 'string') {
+          sizeCategories = JSON.parse(sizeCategoriesRaw);
+        } else if (Array.isArray(sizeCategoriesRaw)) {
+          sizeCategories = sizeCategoriesRaw;
+        }
+      } catch (error) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid sizeCategories format',
+        });
+        return;
+      }
+
       if (sizeCategories.length === 0) {
         res.status(400).json({
           success: false,
