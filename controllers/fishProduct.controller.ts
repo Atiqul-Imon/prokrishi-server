@@ -1,7 +1,6 @@
 import { Response } from 'express';
 import FishProduct from '../models/fishProduct.model.js';
 import Category from '../models/category.model.js';
-import FishInventory from '../models/fishInventory.model.js';
 import mongoose from 'mongoose';
 import ImageKit from 'imagekit';
 import logger from '../services/logger.js';
@@ -107,29 +106,23 @@ export const getAllFishProducts = async (req: AuthRequest, res: Response): Promi
       FishProduct.countDocuments(query),
     ]);
 
-    // Calculate available stock for each product based on inventory
-    const productsWithStock = await Promise.all(
-      products.map(async (product: any) => {
-        const availableStock = await FishInventory.countDocuments({
-          fishProduct: product._id,
-          status: 'available',
-        });
+    // Calculate available stock and price range for each product
+    const productsWithStock = products.map((product: any) => {
+      // Calculate total stock from size categories
+      const activeCategories = product.sizeCategories.filter(
+        (cat: any) => cat.status === 'active'
+      );
+      const totalStock = activeCategories.reduce((sum: number, cat: any) => sum + (cat.stock || 0), 0);
+      const prices = activeCategories.map((cat: any) => cat.pricePerKg);
+      const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
+      const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
 
-        // Calculate price range from size categories
-        const activeCategories = product.sizeCategories.filter(
-          (cat: any) => cat.status === 'active'
-        );
-        const prices = activeCategories.map((cat: any) => cat.pricePerKg);
-        const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
-        const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
-
-        return {
-          ...product,
-          availableStock,
-          priceRange: { min: minPrice, max: maxPrice },
-        };
-      })
-    );
+      return {
+        ...product,
+        availableStock: totalStock,
+        priceRange: { min: minPrice, max: maxPrice },
+      };
+    });
 
     res.json({
       success: true,
@@ -168,36 +161,13 @@ export const getFishProductById = async (req: AuthRequest, res: Response): Promi
       return;
     }
 
-    // Get inventory stats for each size category
-    const inventoryStats = await Promise.all(
-      product.sizeCategories.map(async (sizeCat: any) => {
-        const available = await FishInventory.countDocuments({
-          fishProduct: product._id,
-          sizeCategoryId: sizeCat._id,
-          status: 'available',
-        });
-        const reserved = await FishInventory.countDocuments({
-          fishProduct: product._id,
-          sizeCategoryId: sizeCat._id,
-          status: 'reserved',
-        });
-        const sold = await FishInventory.countDocuments({
-          fishProduct: product._id,
-          sizeCategoryId: sizeCat._id,
-          status: 'sold',
-        });
-
-        return {
-          ...sizeCat.toObject(),
-          inventory: {
-            available,
-            reserved,
-            sold,
-            total: available + reserved + sold,
-          },
-        };
-      })
-    );
+    // Return size categories with stock info
+    const inventoryStats = product.sizeCategories.map((sizeCat: any) => {
+      return {
+        ...sizeCat.toObject(),
+        stock: sizeCat.stock || 0,
+      };
+    });
 
     res.json({
       success: true,
@@ -221,7 +191,7 @@ export const createFishProduct = async (req: AuthRequest, res: Response): Promis
   try {
     const {
       name,
-      category,
+      category: categoryId,
       description,
       shortDescription,
       sizeCategories: sizeCategoriesRaw,
@@ -232,10 +202,24 @@ export const createFishProduct = async (req: AuthRequest, res: Response): Promis
       metaDescription,
     } = req.body;
 
-    if (!name || !category) {
-      res.status(400).json({ success: false, message: 'Name and category are required' });
+    if (!name) {
+      res.status(400).json({ success: false, message: 'Name is required' });
       return;
     }
+
+    // Auto-assign to "মাছ" category - find or create it
+    let fishCategory = await Category.findOne({ name: 'মাছ' });
+    if (!fishCategory) {
+      // Create the category if it doesn't exist
+      fishCategory = new Category({
+        name: 'মাছ',
+        slug: 'machh',
+        description: 'Fish products',
+      });
+      await fishCategory.save();
+      logger.info('Created "মাছ" category for fish products');
+    }
+    const category = categoryId || fishCategory._id;
 
     // Parse JSON strings from FormData
     let sizeCategories: any[] = [];
@@ -292,6 +276,7 @@ export const createFishProduct = async (req: AuthRequest, res: Response): Promis
       }
     }
 
+    // Verify category exists (should be "মাছ" category)
     const existingCategory = await Category.findById(category);
     if (!existingCategory) {
       res.status(400).json({ success: false, message: 'Invalid category ID' });
@@ -310,6 +295,7 @@ export const createFishProduct = async (req: AuthRequest, res: Response): Promis
     const normalizedSizeCategories = sizeCategories.map((cat: any, index: number) => ({
       label: cat.label.trim(),
       pricePerKg: Number(cat.pricePerKg),
+      stock: cat.stock !== undefined ? Number(cat.stock) : 0,
       minWeight: cat.minWeight ? Number(cat.minWeight) : undefined,
       maxWeight: cat.maxWeight ? Number(cat.maxWeight) : undefined,
       sku: cat.sku?.trim() || undefined,
@@ -479,6 +465,7 @@ export const updateFishProduct = async (req: AuthRequest, res: Response): Promis
           _id: existingCat?._id || new mongoose.Types.ObjectId(),
           label: cat.label.trim(),
           pricePerKg: Number(cat.pricePerKg),
+          stock: cat.stock !== undefined ? Number(cat.stock) : (existingCat?.stock || 0),
           minWeight: cat.minWeight ? Number(cat.minWeight) : undefined,
           maxWeight: cat.maxWeight ? Number(cat.maxWeight) : undefined,
           sku: cat.sku?.trim() || undefined,
@@ -538,16 +525,13 @@ export const deleteFishProduct = async (req: AuthRequest, res: Response): Promis
       return;
     }
 
-    // Check if there are any inventory items or orders
-    const [inventoryCount, orderCount] = await Promise.all([
-      FishInventory.countDocuments({ fishProduct: id }),
-      mongoose.model('FishOrder').countDocuments({ 'orderItems.fishProduct': id }),
-    ]);
+    // Check if there are any orders
+    const orderCount = await mongoose.model('FishOrder').countDocuments({ 'orderItems.fishProduct': id });
 
-    if (inventoryCount > 0 || orderCount > 0) {
+    if (orderCount > 0) {
       res.status(400).json({
         success: false,
-        message: `Cannot delete fish product. It has ${inventoryCount} inventory items and ${orderCount} orders associated with it.`,
+        message: `Cannot delete fish product. It has ${orderCount} orders associated with it.`,
       });
       return;
     }

@@ -9,7 +9,7 @@ export interface IFishOrderItem {
   actualWeight?: number; // Actual weight delivered (may differ slightly)
   pricePerKg: number; // Price per kg at time of order
   totalPrice: number; // Calculated: requestedWeight × pricePerKg
-  inventoryItems: mongoose.Types.ObjectId[]; // References to FishInventory items used
+  stockDeducted?: number; // Stock quantity deducted for this order item
   notes?: string;
 }
 
@@ -84,12 +84,10 @@ const fishOrderItemSchema = new Schema<IFishOrderItem>(
       required: true,
       min: 0,
     },
-    inventoryItems: [
-      {
-        type: Schema.Types.ObjectId,
-        ref: 'FishInventory',
-      },
-    ],
+    stockDeducted: {
+      type: Number,
+      min: 0,
+    },
     notes: {
       type: String,
       trim: true,

@@ -1,7 +1,6 @@
 import { Response } from 'express';
 import FishOrder from '../models/fishOrder.model.js';
 import FishProduct from '../models/fishProduct.model.js';
-import FishInventory from '../models/fishInventory.model.js';
 import mongoose from 'mongoose';
 import logger from '../services/logger.js';
 import { AuthRequest } from '../types/index.js';
@@ -87,8 +86,7 @@ export const getFishOrderById = async (req: AuthRequest, res: Response): Promise
 
     const order = await FishOrder.findById(id)
       .populate('user', 'name email phone')
-      .populate('orderItems.fishProduct', 'name image')
-      .populate('orderItems.inventoryItems');
+      .populate('orderItems.fishProduct', 'name image');
 
     if (!order) {
       res.status(404).json({ success: false, message: 'Fish order not found' });
@@ -160,7 +158,7 @@ export const createFishOrder = async (req: AuthRequest, res: Response): Promise<
     const session = await mongoose.startSession();
     session.startTransaction();
 
-    const inventoryUpdates: any[] = [];
+    const stockUpdates: Array<{ productId: string; sizeCategoryId: string; stockDeducted: number }> = [];
 
     try {
       const validatedItems: any[] = [];
@@ -173,13 +171,14 @@ export const createFishOrder = async (req: AuthRequest, res: Response): Promise<
           throw new Error(`Fish product not found: ${item.fishProduct}`);
         }
 
-        const sizeCategory = (fishProduct as any).sizeCategories.find(
+        const sizeCategoryIndex = (fishProduct as any).sizeCategories.findIndex(
           (cat: any) => cat._id.toString() === item.sizeCategoryId
         );
-        if (!sizeCategory) {
+        if (sizeCategoryIndex === -1) {
           throw new Error(`Size category not found for product ${fishProduct.name}`);
         }
 
+        const sizeCategory = (fishProduct as any).sizeCategories[sizeCategoryIndex];
         if (sizeCategory.status !== 'active') {
           throw new Error(`Size category "${sizeCategory.label}" is not active`);
         }
@@ -189,45 +188,34 @@ export const createFishOrder = async (req: AuthRequest, res: Response): Promise<
           throw new Error(`Invalid requested weight: ${item.requestedWeight}`);
         }
 
+        // Check stock availability (stock represents quantity, not weight)
+        // For fish, we'll treat stock as available quantity (each unit can be 1kg or as specified)
+        const availableStock = sizeCategory.stock || 0;
+        if (availableStock < 1) {
+          throw new Error(`Insufficient stock for size category "${sizeCategory.label}"`);
+        }
+
         const pricePerKg = sizeCategory.pricePerKg;
         const itemTotal = requestedWeight * pricePerKg;
         calculatedTotal += itemTotal;
 
-        // Find available fish from inventory
-        const availableFish = await FishInventory.find({
-          fishProduct: item.fishProduct,
-          sizeCategoryId: item.sizeCategoryId,
-          status: 'available',
-        })
-          .session(session)
-          .sort({ actualWeight: 1 }) // Prefer smaller fish first
-          .limit(10); // Get enough to match weight
-
-        let totalWeight = 0;
-        const selectedInventoryItems: mongoose.Types.ObjectId[] = [];
-
-        for (const fish of availableFish) {
-          if (totalWeight >= requestedWeight) break;
-          selectedInventoryItems.push(fish._id);
-          totalWeight += (fish as any).actualWeight;
-        }
-
-        if (totalWeight < requestedWeight * 0.9) {
-          // Allow 10% tolerance
+        // Deduct stock (treating each stock unit as 1 orderable unit)
+        const stockToDeduct = Math.ceil(requestedWeight); // Round up to nearest whole unit
+        if (availableStock < stockToDeduct) {
           throw new Error(
-            `Insufficient fish available. Requested: ${requestedWeight}kg, Available: ${totalWeight.toFixed(2)}kg`
+            `Insufficient stock. Requested: ${stockToDeduct} units, Available: ${availableStock} units`
           );
         }
 
-        // Reserve the inventory items
-        for (const invId of selectedInventoryItems) {
-          await FishInventory.findByIdAndUpdate(
-            invId,
-            { status: 'reserved' },
-            { session }
-          );
-          inventoryUpdates.push({ id: invId, status: 'reserved' });
-        }
+        // Update stock in the product
+        (fishProduct as any).sizeCategories[sizeCategoryIndex].stock = availableStock - stockToDeduct;
+        stockUpdates.push({
+          productId: fishProduct._id.toString(),
+          sizeCategoryId: item.sizeCategoryId,
+          stockDeducted: stockToDeduct,
+        });
+
+        await fishProduct.save({ session });
 
         validatedItems.push({
           fishProduct: fishProduct._id,
@@ -235,9 +223,10 @@ export const createFishOrder = async (req: AuthRequest, res: Response): Promise<
           sizeCategoryId: sizeCategory._id,
           sizeCategoryLabel: sizeCategory.label,
           requestedWeight,
+          actualWeight: requestedWeight, // For fish, requested weight is actual weight
           pricePerKg,
           totalPrice: itemTotal,
-          inventoryItems: selectedInventoryItems,
+          stockDeducted: stockToDeduct,
           notes: item.notes,
         });
       }
@@ -262,24 +251,12 @@ export const createFishOrder = async (req: AuthRequest, res: Response): Promise<
         notes: notes?.trim(),
       });
 
-      // Link reserved inventory to order
-      for (const item of validatedItems) {
-        for (const invId of item.inventoryItems) {
-          await FishInventory.findByIdAndUpdate(
-            invId,
-            { reservedForOrder: fishOrder._id },
-            { session }
-          );
-        }
-      }
-
       await fishOrder.save({ session });
 
       await session.commitTransaction();
 
       const populatedOrder = await FishOrder.findById(fishOrder._id)
-        .populate('orderItems.fishProduct', 'name image')
-        .populate('orderItems.inventoryItems');
+        .populate('orderItems.fishProduct', 'name image');
 
       res.status(201).json({
         success: true,
@@ -289,9 +266,22 @@ export const createFishOrder = async (req: AuthRequest, res: Response): Promise<
     } catch (error: any) {
       await session.abortTransaction();
 
-      // Release reserved inventory
-      for (const update of inventoryUpdates) {
-        await FishInventory.findByIdAndUpdate(update.id, { status: 'available' });
+      // Restore stock if order creation failed
+      for (const update of stockUpdates) {
+        try {
+          const product = await FishProduct.findById(update.productId);
+          if (product) {
+            const sizeCatIndex = (product as any).sizeCategories.findIndex(
+              (cat: any) => cat._id.toString() === update.sizeCategoryId
+            );
+            if (sizeCatIndex !== -1) {
+              (product as any).sizeCategories[sizeCatIndex].stock += update.stockDeducted;
+              await product.save();
+            }
+          }
+        } catch (restoreError) {
+          logger.error('Error restoring stock:', restoreError);
+        }
       }
 
       throw error;
@@ -350,40 +340,32 @@ export const updateFishOrderStatus = async (req: AuthRequest, res: Response): Pr
           (order as any).cancellationReason = cancellationReason.trim();
         }
 
-        // Release reserved inventory
+        // Restore stock for cancelled orders
         for (const item of (order as any).orderItems) {
-          for (const invId of item.inventoryItems) {
-            await FishInventory.findByIdAndUpdate(
-              invId,
-              { status: 'available', reservedForOrder: undefined },
-              { session }
+          const product = await FishProduct.findById(item.fishProduct).session(session);
+          if (product) {
+            const sizeCatIndex = (product as any).sizeCategories.findIndex(
+              (cat: any) => cat._id.toString() === item.sizeCategoryId.toString()
             );
+            if (sizeCatIndex !== -1 && item.stockDeducted) {
+              (product as any).sizeCategories[sizeCatIndex].stock += item.stockDeducted;
+              await product.save({ session });
+            }
           }
         }
       } else if (status === 'delivered' && oldStatus !== 'delivered') {
         (order as any).deliveredAt = new Date();
         (order as any).paymentStatus = 'completed';
-
-        // Mark inventory as sold
-        for (const item of (order as any).orderItems) {
-          for (const invId of item.inventoryItems) {
-            await FishInventory.findByIdAndUpdate(
-              invId,
-              { status: 'sold', soldToOrder: order._id, reservedForOrder: undefined },
-              { session }
-            );
-          }
-        }
+        // Stock already deducted, no need to do anything
       } else if (status === 'confirmed' && oldStatus === 'pending') {
-        // Keep inventory reserved
+        // Stock already deducted, keep it deducted
       }
 
       await order.save({ session });
       await session.commitTransaction();
 
       const populatedOrder = await FishOrder.findById(order._id)
-        .populate('orderItems.fishProduct', 'name image')
-        .populate('orderItems.inventoryItems');
+        .populate('orderItems.fishProduct', 'name image');
 
       res.json({
         success: true,
@@ -434,14 +416,17 @@ export const deleteFishOrder = async (req: AuthRequest, res: Response): Promise<
     session.startTransaction();
 
     try {
-      // Release reserved inventory
+      // Restore stock for deleted orders
       for (const item of (order as any).orderItems) {
-        for (const invId of item.inventoryItems) {
-          await FishInventory.findByIdAndUpdate(
-            invId,
-            { status: 'available', reservedForOrder: undefined },
-            { session }
+        const product = await FishProduct.findById(item.fishProduct).session(session);
+        if (product) {
+          const sizeCatIndex = (product as any).sizeCategories.findIndex(
+            (cat: any) => cat._id.toString() === item.sizeCategoryId.toString()
           );
+          if (sizeCatIndex !== -1 && item.stockDeducted) {
+            (product as any).sizeCategories[sizeCatIndex].stock += item.stockDeducted;
+            await product.save({ session });
+          }
         }
       }
 

@@ -16,7 +16,6 @@ import dashboardRoutes from './routes/dashboard.route.js';
 import adminOrderRouter from './routes/adminOrder.route.js';
 import mediaRouter from './routes/media.route.js';
 import fishProductRouter from './routes/fishProduct.route.js';
-import fishInventoryRouter from './routes/fishInventory.route.js';
 import fishOrderRouter from './routes/fishOrder.route.js';
 
 import {
@@ -131,7 +130,6 @@ app.use('/api/dashboard', adminRateLimit, dashboardRoutes);
 app.use('/api/admin/orders', adminRateLimit, adminOrderRouter);
 app.use('/api/media', adminRateLimit, mediaRouter);
 app.use('/api/fish/products', adminRateLimit, fishProductRouter);
-app.use('/api/fish/inventory', adminRateLimit, fishInventoryRouter);
 app.use('/api/fish/orders', adminRateLimit, fishOrderRouter);
 
 app.use('/api/user', userRouter);

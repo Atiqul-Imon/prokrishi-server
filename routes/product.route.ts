@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import {
   createProduct,
   getAllProducts,
+  getAdminProducts,
   getProductById,
   updateProduct,
   deleteProduct,
@@ -18,7 +19,11 @@ import upload from '../middlewares/multer.js';
 
 const productRouter = Router();
 
+// Public endpoint - includes fish products
 productRouter.get('/', getAllProducts);
+
+// Admin endpoint - excludes fish products (fish products managed separately)
+productRouter.get('/admin', authenticate, authorizeAdmin, getAdminProducts);
 productRouter.get('/search', searchProducts);
 productRouter.get('/featured', getFeaturedProducts);
 productRouter.get('/popular', getPopularProducts);

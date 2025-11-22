@@ -3,6 +3,7 @@ import mongoose, { Schema, Model } from 'mongoose';
 export interface IFishSizeCategory {
   label: string; // e.g., "2kg size", "4kg size"
   pricePerKg: number; // Price per kilogram for this size
+  stock: number; // Stock quantity for this size category
   minWeight?: number; // Optional minimum weight for this size category
   maxWeight?: number; // Optional maximum weight for this size category
   sku?: string; // Optional SKU for this size category
@@ -42,6 +43,12 @@ const fishSizeCategorySchema = new Schema<IFishSizeCategory>(
       type: Number,
       required: true,
       min: 0,
+    },
+    stock: {
+      type: Number,
+      required: true,
+      min: 0,
+      default: 0,
     },
     minWeight: {
       type: Number,

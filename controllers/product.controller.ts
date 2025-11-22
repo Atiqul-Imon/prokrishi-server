@@ -1,5 +1,6 @@
 import { Response } from 'express';
 import Product from '../models/product.model.js';
+import FishProduct from '../models/fishProduct.model.js';
 import Category from '../models/category.model.js';
 import mongoose from 'mongoose';
 import ImageKit from 'imagekit';
@@ -246,6 +247,7 @@ export const createProduct = async (req: AuthRequest, res: Response): Promise<vo
   }
 };
 
+// Public endpoint - always includes fish products
 export const getAllProducts = async (req: AuthRequest, res: Response): Promise<void> => {
   const startTime = Date.now();
 
@@ -259,26 +261,148 @@ export const getAllProducts = async (req: AuthRequest, res: Response): Promise<v
       order = 'desc',
     } = req.query;
 
-    const query: any = {};
-    if (category) {
-      query.category = new mongoose.Types.ObjectId(category as string);
-    }
-    if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-      ];
-    }
-    query.status = 'active';
+    // Find "মাছ" category
+    const fishCategory = await Category.findOne({ name: 'মাছ' });
+    const isFishCategory = category && fishCategory && category.toString() === fishCategory._id.toString();
 
-    const products = await Product.find(query)
-      .populate('category', 'name slug')
-      .sort({ [sort as string]: order === 'desc' ? -1 : 1 })
-      .skip((parseInt(page as string) - 1) * parseInt(limit as string))
-      .limit(parseInt(limit as string))
-      .lean();
+    let products: any[] = [];
+    let totalProducts = 0;
 
-    const totalProducts = await Product.countDocuments(query);
+    if (isFishCategory) {
+      // If filtering by "মাছ" category, only return fish products
+      const fishQuery: any = { status: 'active' };
+      if (search) {
+        fishQuery.$or = [
+          { name: { $regex: search, $options: 'i' } },
+          { description: { $regex: search, $options: 'i' } },
+        ];
+      }
+
+      const fishProducts = await FishProduct.find(fishQuery)
+        .populate('category', 'name slug')
+        .sort({ [sort as string]: order === 'desc' ? -1 : 1 })
+        .skip((parseInt(page as string) - 1) * parseInt(limit as string))
+        .limit(parseInt(limit as string))
+        .lean();
+
+      // Convert fish products to regular product format for compatibility
+      products = fishProducts.map((fp: any) => {
+        const defaultSizeCat = fp.sizeCategories.find((sc: any) => sc.isDefault) || fp.sizeCategories[0];
+        const totalStock = fp.sizeCategories.reduce((sum: number, sc: any) => sum + (sc.stock || 0), 0);
+        const minPrice = Math.min(...fp.sizeCategories.map((sc: any) => sc.pricePerKg));
+        const maxPrice = Math.max(...fp.sizeCategories.map((sc: any) => sc.pricePerKg));
+
+        return {
+          ...fp,
+          _id: fp._id,
+          price: defaultSizeCat?.pricePerKg || minPrice,
+          stock: totalStock,
+          measurement: 1,
+          unit: 'kg',
+          hasVariants: fp.sizeCategories.length > 1,
+          variants: fp.sizeCategories.map((sc: any) => ({
+            _id: sc._id,
+            label: sc.label,
+            price: sc.pricePerKg,
+            stock: sc.stock || 0,
+            measurement: 1,
+            unit: 'kg',
+            status: sc.status,
+            isDefault: sc.isDefault,
+          })),
+          priceRange: { min: minPrice, max: maxPrice },
+          isFishProduct: true,
+        };
+      });
+
+      totalProducts = await FishProduct.countDocuments(fishQuery);
+    } else {
+      // Regular products - exclude "মাছ" category
+      const query: any = { status: 'active' };
+      if (category) {
+        query.category = new mongoose.Types.ObjectId(category as string);
+      } else if (fishCategory) {
+        // Exclude "মাছ" category from regular products
+        query.category = { $ne: fishCategory._id };
+      }
+      if (search) {
+        query.$or = [
+          { name: { $regex: search, $options: 'i' } },
+          { description: { $regex: search, $options: 'i' } },
+        ];
+      }
+
+      products = await Product.find(query)
+        .populate('category', 'name slug')
+        .sort({ [sort as string]: order === 'desc' ? -1 : 1 })
+        .skip((parseInt(page as string) - 1) * parseInt(limit as string))
+        .limit(parseInt(limit as string))
+        .lean();
+
+      totalProducts = await Product.countDocuments(query);
+
+      // Always include fish products on public pages (when no category filter)
+      if (!category && fishCategory) {
+        const fishQuery: any = { status: 'active', category: fishCategory._id };
+        if (search) {
+          fishQuery.$or = [
+            { name: { $regex: search, $options: 'i' } },
+            { description: { $regex: search, $options: 'i' } },
+          ];
+        }
+
+        const fishProducts = await FishProduct.find(fishQuery)
+          .populate('category', 'name slug')
+          .sort({ [sort as string]: order === 'desc' ? -1 : 1 })
+          .lean();
+
+        const convertedFishProducts = fishProducts.map((fp: any) => {
+          const defaultSizeCat = fp.sizeCategories.find((sc: any) => sc.isDefault) || fp.sizeCategories[0];
+          const totalStock = fp.sizeCategories.reduce((sum: number, sc: any) => sum + (sc.stock || 0), 0);
+          const minPrice = Math.min(...fp.sizeCategories.map((sc: any) => sc.pricePerKg));
+          const maxPrice = Math.max(...fp.sizeCategories.map((sc: any) => sc.pricePerKg));
+
+          return {
+            ...fp,
+            _id: fp._id,
+            price: defaultSizeCat?.pricePerKg || minPrice,
+            stock: totalStock,
+            measurement: 1,
+            unit: 'kg',
+            hasVariants: fp.sizeCategories.length > 1,
+            variants: fp.sizeCategories.map((sc: any) => ({
+              _id: sc._id,
+              label: sc.label,
+              price: sc.pricePerKg,
+              stock: sc.stock || 0,
+              measurement: 1,
+              unit: 'kg',
+              status: sc.status,
+              isDefault: sc.isDefault,
+            })),
+            priceRange: { min: minPrice, max: maxPrice },
+            isFishProduct: true,
+          };
+        });
+
+        products = [...products, ...convertedFishProducts];
+        totalProducts += fishProducts.length;
+
+        // Re-sort combined results
+        const sortOrder = order === 'desc' ? -1 : 1;
+        products.sort((a: any, b: any) => {
+          const aVal = a[sort as string];
+          const bVal = b[sort as string];
+          if (aVal < bVal) return -1 * sortOrder;
+          if (aVal > bVal) return 1 * sortOrder;
+          return 0;
+        });
+
+        // Apply pagination to combined results
+        const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
+        products = products.slice(skip, skip + parseInt(limit as string));
+      }
+    }
 
     const pagination = {
       currentPage: parseInt(page as string),
@@ -305,6 +429,72 @@ export const getAllProducts = async (req: AuthRequest, res: Response): Promise<v
   }
 };
 
+// Admin endpoint - excludes fish products (fish products managed separately)
+export const getAdminProducts = async (req: AuthRequest, res: Response): Promise<void> => {
+  const startTime = Date.now();
+
+  try {
+    const {
+      page = 1,
+      limit = 20,
+      category,
+      search,
+      sort = 'createdAt',
+      order = 'desc',
+    } = req.query;
+
+    // Find "মাছ" category to exclude it
+    const fishCategory = await Category.findOne({ name: 'মাছ' });
+
+    const query: any = { status: 'active' };
+    
+    if (category) {
+      query.category = new mongoose.Types.ObjectId(category as string);
+    } else if (fishCategory) {
+      // Always exclude "মাছ" category from admin products
+      query.category = { $ne: fishCategory._id };
+    }
+    
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const products = await Product.find(query)
+      .populate('category', 'name slug')
+      .sort({ [sort as string]: order === 'desc' ? -1 : 1 })
+      .skip((parseInt(page as string) - 1) * parseInt(limit as string))
+      .limit(parseInt(limit as string))
+      .lean();
+
+    const totalProducts = await Product.countDocuments(query);
+
+    const pagination = {
+      currentPage: parseInt(page as string),
+      totalPages: Math.ceil(totalProducts / parseInt(limit as string)),
+      totalProducts,
+      hasNext: parseInt(page as string) * parseInt(limit as string) < totalProducts,
+      hasPrev: parseInt(page as string) > 1,
+    };
+
+    logPerformance('getAdminProducts', Date.now() - startTime, {
+      source: 'database',
+      count: products.length,
+    });
+
+    res.status(200).json({ products, pagination, success: true });
+  } catch (error: any) {
+    logger.error('Error fetching admin products:', error);
+    res.status(500).json({
+      message: 'Error fetching products',
+      error: true,
+      success: false,
+    });
+  }
+};
+
 export const getProductById = async (req: AuthRequest, res: Response): Promise<void> => {
   const startTime = Date.now();
 
@@ -322,10 +512,47 @@ export const getProductById = async (req: AuthRequest, res: Response): Promise<v
     const isObjectId = mongoose.Types.ObjectId.isValid(id);
     const query = isObjectId ? { _id: id } : { slug: id };
 
-    const product = await Product.findOne(query)
+    let product: any = await Product.findOne(query)
       .populate('category', 'name slug description image')
       .select('-__v')
       .lean();
+
+    // If not found in regular products, check fish products
+    if (!product) {
+      const fishProduct = await FishProduct.findOne(query)
+        .populate('category', 'name slug description image')
+        .select('-__v')
+        .lean();
+
+      if (fishProduct) {
+        // Convert fish product to regular product format
+        const defaultSizeCat = (fishProduct as any).sizeCategories.find((sc: any) => sc.isDefault) || (fishProduct as any).sizeCategories[0];
+        const totalStock = (fishProduct as any).sizeCategories.reduce((sum: number, sc: any) => sum + (sc.stock || 0), 0);
+        const minPrice = Math.min(...(fishProduct as any).sizeCategories.map((sc: any) => sc.pricePerKg));
+        const maxPrice = Math.max(...(fishProduct as any).sizeCategories.map((sc: any) => sc.pricePerKg));
+
+        product = {
+          ...fishProduct,
+          price: defaultSizeCat?.pricePerKg || minPrice,
+          stock: totalStock,
+          measurement: 1,
+          unit: 'kg',
+          hasVariants: (fishProduct as any).sizeCategories.length > 1,
+          variants: (fishProduct as any).sizeCategories.map((sc: any) => ({
+            _id: sc._id,
+            label: sc.label,
+            price: sc.pricePerKg,
+            stock: sc.stock || 0,
+            measurement: 1,
+            unit: 'kg',
+            status: sc.status,
+            isDefault: sc.isDefault,
+          })),
+          priceRange: { min: minPrice, max: maxPrice },
+          isFishProduct: true,
+        };
+      }
+    }
 
     if (!product) {
       logger.warn(`Product not found: ${id}`);
@@ -543,10 +770,53 @@ export const deleteProduct = async (req: AuthRequest, res: Response): Promise<vo
 
 export const getFeaturedProducts = async (_req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const products = await Product.find({ isFeatured: true })
+    // Get featured regular products
+    const regularProducts = await Product.find({ isFeatured: true, status: 'active' })
       .populate('category')
       .select('-__v')
       .lean();
+
+    // Get featured fish products
+    const fishCategory = await Category.findOne({ name: 'মাছ' });
+    const fishProducts = fishCategory
+      ? await FishProduct.find({ isFeatured: true, status: 'active', category: fishCategory._id })
+          .populate('category')
+          .select('-__v')
+          .lean()
+      : [];
+
+    // Convert fish products to regular product format
+    const convertedFishProducts = fishProducts.map((fp: any) => {
+      const defaultSizeCat = fp.sizeCategories.find((sc: any) => sc.isDefault) || fp.sizeCategories[0];
+      const totalStock = fp.sizeCategories.reduce((sum: number, sc: any) => sum + (sc.stock || 0), 0);
+      const minPrice = Math.min(...fp.sizeCategories.map((sc: any) => sc.pricePerKg));
+      const maxPrice = Math.max(...fp.sizeCategories.map((sc: any) => sc.pricePerKg));
+
+      return {
+        ...fp,
+        _id: fp._id,
+        price: defaultSizeCat?.pricePerKg || minPrice,
+        stock: totalStock,
+        measurement: 1,
+        unit: 'kg',
+        hasVariants: fp.sizeCategories.length > 1,
+        variants: fp.sizeCategories.map((sc: any) => ({
+          _id: sc._id,
+          label: sc.label,
+          price: sc.pricePerKg,
+          stock: sc.stock || 0,
+          measurement: 1,
+          unit: 'kg',
+          status: sc.status,
+          isDefault: sc.isDefault,
+        })),
+        priceRange: { min: minPrice, max: maxPrice },
+        isFishProduct: true,
+      };
+    });
+
+    // Combine regular and fish products
+    const products = [...regularProducts, ...convertedFishProducts];
 
     res.status(200).json({
       message: 'Featured products fetched successfully',
@@ -554,18 +824,70 @@ export const getFeaturedProducts = async (_req: AuthRequest, res: Response): Pro
       products,
     });
   } catch (error: any) {
+    logger.error('Error fetching featured products:', error);
     res.status(500).json({ message: 'Server error', success: false, error: true });
   }
 };
 
 export const getPopularProducts = async (_req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const products = await Product.find({})
+    // Get popular regular products
+    const regularProducts = await Product.find({ status: 'active' })
       .sort({ sold: -1 })
       .limit(10)
       .populate('category')
       .select('-__v')
       .lean();
+
+    // Get popular fish products
+    const fishCategory = await Category.findOne({ name: 'মাছ' });
+    const fishProducts = fishCategory
+      ? await FishProduct.find({ status: 'active', category: fishCategory._id })
+          .sort({ views: -1 })
+          .limit(10)
+          .populate('category')
+          .select('-__v')
+          .lean()
+      : [];
+
+    // Convert fish products to regular product format
+    const convertedFishProducts = fishProducts.map((fp: any) => {
+      const defaultSizeCat = fp.sizeCategories.find((sc: any) => sc.isDefault) || fp.sizeCategories[0];
+      const totalStock = fp.sizeCategories.reduce((sum: number, sc: any) => sum + (sc.stock || 0), 0);
+      const minPrice = Math.min(...fp.sizeCategories.map((sc: any) => sc.pricePerKg));
+      const maxPrice = Math.max(...fp.sizeCategories.map((sc: any) => sc.pricePerKg));
+
+      return {
+        ...fp,
+        _id: fp._id,
+        price: defaultSizeCat?.pricePerKg || minPrice,
+        stock: totalStock,
+        measurement: 1,
+        unit: 'kg',
+        hasVariants: fp.sizeCategories.length > 1,
+        variants: fp.sizeCategories.map((sc: any) => ({
+          _id: sc._id,
+          label: sc.label,
+          price: sc.pricePerKg,
+          stock: sc.stock || 0,
+          measurement: 1,
+          unit: 'kg',
+          status: sc.status,
+          isDefault: sc.isDefault,
+        })),
+        priceRange: { min: minPrice, max: maxPrice },
+        isFishProduct: true,
+      };
+    });
+
+    // Combine and sort by popularity (sold for regular, views for fish)
+    const products = [...regularProducts, ...convertedFishProducts]
+      .sort((a: any, b: any) => {
+        const aPopularity = a.sold || a.views || 0;
+        const bPopularity = b.sold || b.views || 0;
+        return bPopularity - aPopularity;
+      })
+      .slice(0, 10);
 
     res.status(200).json({
       message: 'Popular products fetched successfully',
@@ -573,19 +895,71 @@ export const getPopularProducts = async (_req: AuthRequest, res: Response): Prom
       products,
     });
   } catch (error: any) {
+    logger.error('Error fetching popular products:', error);
     res.status(500).json({ message: 'Server error', success: false, error: true });
   }
 };
 
 export const getProductsByCategory = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const products = await Product.find({ category: req.params.categoryId }).populate('category');
+    const categoryId = req.params.categoryId;
+    
+    // Find the category to check if it's "মাছ"
+    const category = await Category.findById(categoryId);
+    const fishCategory = await Category.findOne({ name: 'মাছ' });
+    const isFishCategory = category && fishCategory && category._id.toString() === fishCategory._id.toString();
+
+    let products: any[] = [];
+
+    if (isFishCategory) {
+      // If it's the fish category, fetch from FishProduct
+      const fishProducts = await FishProduct.find({ category: categoryId, status: 'active' })
+        .populate('category')
+        .lean();
+
+      // Convert fish products to regular product format
+      products = fishProducts.map((fp: any) => {
+        const defaultSizeCat = fp.sizeCategories.find((sc: any) => sc.isDefault) || fp.sizeCategories[0];
+        const totalStock = fp.sizeCategories.reduce((sum: number, sc: any) => sum + (sc.stock || 0), 0);
+        const minPrice = Math.min(...fp.sizeCategories.map((sc: any) => sc.pricePerKg));
+        const maxPrice = Math.max(...fp.sizeCategories.map((sc: any) => sc.pricePerKg));
+
+        return {
+          ...fp,
+          _id: fp._id,
+          price: defaultSizeCat?.pricePerKg || minPrice,
+          stock: totalStock,
+          measurement: 1,
+          unit: 'kg',
+          hasVariants: fp.sizeCategories.length > 1,
+          variants: fp.sizeCategories.map((sc: any) => ({
+            _id: sc._id,
+            label: sc.label,
+            price: sc.pricePerKg,
+            stock: sc.stock || 0,
+            measurement: 1,
+            unit: 'kg',
+            status: sc.status,
+            isDefault: sc.isDefault,
+          })),
+          priceRange: { min: minPrice, max: maxPrice },
+          isFishProduct: true,
+        };
+      });
+    } else {
+      // Regular category, fetch from Product
+      products = await Product.find({ category: categoryId, status: 'active' })
+        .populate('category')
+        .lean();
+    }
+
     res.status(200).json({
       message: 'Products by category fetched successfully',
       success: true,
       products,
     });
   } catch (error: any) {
+    logger.error('Error fetching products by category:', error);
     res.status(500).json({ message: 'Server error', success: false, error: true });
   }
 };
@@ -602,7 +976,53 @@ export const getProductsByCategorySlug = async (req: AuthRequest, res: Response)
       return;
     }
 
-    const products = await Product.find({ category: (category as any)._id }).populate('category');
+    // Check if it's the fish category
+    const fishCategory = await Category.findOne({ name: 'মাছ' });
+    const isFishCategory = fishCategory && category._id.toString() === fishCategory._id.toString();
+
+    let products: any[] = [];
+
+    if (isFishCategory) {
+      // If it's the fish category, fetch from FishProduct
+      const fishProducts = await FishProduct.find({ category: category._id, status: 'active' })
+        .populate('category')
+        .lean();
+
+      // Convert fish products to regular product format
+      products = fishProducts.map((fp: any) => {
+        const defaultSizeCat = fp.sizeCategories.find((sc: any) => sc.isDefault) || fp.sizeCategories[0];
+        const totalStock = fp.sizeCategories.reduce((sum: number, sc: any) => sum + (sc.stock || 0), 0);
+        const minPrice = Math.min(...fp.sizeCategories.map((sc: any) => sc.pricePerKg));
+        const maxPrice = Math.max(...fp.sizeCategories.map((sc: any) => sc.pricePerKg));
+
+        return {
+          ...fp,
+          _id: fp._id,
+          price: defaultSizeCat?.pricePerKg || minPrice,
+          stock: totalStock,
+          measurement: 1,
+          unit: 'kg',
+          hasVariants: fp.sizeCategories.length > 1,
+          variants: fp.sizeCategories.map((sc: any) => ({
+            _id: sc._id,
+            label: sc.label,
+            price: sc.pricePerKg,
+            stock: sc.stock || 0,
+            measurement: 1,
+            unit: 'kg',
+            status: sc.status,
+            isDefault: sc.isDefault,
+          })),
+          priceRange: { min: minPrice, max: maxPrice },
+          isFishProduct: true,
+        };
+      });
+    } else {
+      // Regular category, fetch from Product
+      products = await Product.find({ category: category._id, status: 'active' })
+        .populate('category')
+        .lean();
+    }
 
     res.status(200).json({
       message: 'Products by category fetched successfully',
@@ -610,6 +1030,7 @@ export const getProductsByCategorySlug = async (req: AuthRequest, res: Response)
       products,
     });
   } catch (error: any) {
+    logger.error('Error fetching products by category slug:', error);
     res.status(500).json({ message: 'Server error', success: false, error: true });
   }
 };
