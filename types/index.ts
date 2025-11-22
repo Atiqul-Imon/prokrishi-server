@@ -215,3 +215,100 @@ export interface JWTPayload {
   role: string;
 }
 
+// Fish Product Interfaces
+export interface IFishSizeCategory {
+  _id?: Types.ObjectId;
+  label: string;
+  pricePerKg: number;
+  minWeight?: number;
+  maxWeight?: number;
+  sku?: string;
+  status: 'active' | 'inactive' | 'out_of_stock';
+  isDefault?: boolean;
+}
+
+export interface IFishProduct extends Document {
+  _id: Types.ObjectId;
+  name: string;
+  sku?: string;
+  category: Types.ObjectId;
+  description?: string;
+  shortDescription?: string;
+  image?: string;
+  sizeCategories: IFishSizeCategory[];
+  status: 'active' | 'inactive';
+  isFeatured: boolean;
+  slug?: string;
+  metaTitle?: string;
+  metaDescription?: string;
+  tags?: string[];
+  views?: number;
+  lastViewedAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface IFishInventory extends Document {
+  _id: Types.ObjectId;
+  fishProduct: Types.ObjectId;
+  sizeCategoryId: Types.ObjectId;
+  actualWeight: number;
+  status: 'available' | 'reserved' | 'sold' | 'expired' | 'damaged';
+  purchaseDate?: Date;
+  expiryDate?: Date;
+  location?: string;
+  costPrice?: number;
+  reservedForOrder?: Types.ObjectId;
+  soldToOrder?: Types.ObjectId;
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface IFishOrderItem {
+  _id?: Types.ObjectId;
+  fishProduct: Types.ObjectId;
+  fishProductName: string;
+  sizeCategoryId: Types.ObjectId;
+  sizeCategoryLabel: string;
+  requestedWeight: number;
+  actualWeight?: number;
+  pricePerKg: number;
+  totalPrice: number;
+  inventoryItems: Types.ObjectId[];
+  notes?: string;
+}
+
+export interface IFishOrder extends Document {
+  _id: Types.ObjectId;
+  user?: Types.ObjectId;
+  guestInfo?: {
+    name: string;
+    email?: string;
+    phone: string;
+  };
+  isGuestOrder: boolean;
+  orderItems: IFishOrderItem[];
+  shippingAddress: {
+    name: string;
+    phone: string;
+    address: string;
+    division?: string;
+    district?: string;
+    upazila?: string;
+    postalCode?: string;
+  };
+  paymentMethod: string;
+  totalPrice: number;
+  totalAmount: number;
+  status: 'pending' | 'confirmed' | 'processing' | 'prepared' | 'shipped' | 'delivered' | 'cancelled';
+  paymentStatus: 'pending' | 'completed' | 'failed' | 'cancelled';
+  orderNumber?: string;
+  notes?: string;
+  cancelledAt?: Date;
+  cancellationReason?: string;
+  deliveredAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
