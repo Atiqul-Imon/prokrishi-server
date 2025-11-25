@@ -43,6 +43,7 @@ export interface IProductVariant {
   stock: number;
   measurement?: number;
   unit?: string;
+  unitWeightKg?: number;
   status: 'active' | 'inactive' | 'out_of_stock';
   isDefault?: boolean;
   image?: string;
@@ -60,6 +61,7 @@ export interface IVariantSnapshot {
   measurement?: number;
   unit?: string;
   image?: string;
+  unitWeightKg?: number;
 }
 
 export interface IProduct extends Document {
@@ -77,6 +79,7 @@ export interface IProduct extends Document {
   unit: string;
   measurement?: number;
   measurementIncrement?: number;
+  unitWeightKg?: number;
   specifications?: Record<string, string>;
   views: number;
   sold: number;
@@ -174,6 +177,10 @@ export interface IOrder extends Document {
   };
   totalPrice: number;
   totalAmount: number;
+  shippingFee?: number;
+  shippingZone?: 'inside_dhaka' | 'outside_dhaka';
+  shippingWeightKg?: number;
+  shippingBreakdown?: Record<string, any>;
   status: 'pending' | 'confirmed' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
   paymentStatus: 'pending' | 'completed' | 'failed' | 'cancelled';
   transactionId?: string;
@@ -301,6 +308,9 @@ export interface IFishOrder extends Document {
   paymentMethod: string;
   totalPrice: number;
   totalAmount: number;
+  shippingFee?: number;
+  shippingZone?: 'inside_dhaka' | 'outside_dhaka';
+  shippingBreakdown?: Record<string, any>;
   status: 'pending' | 'confirmed' | 'processing' | 'prepared' | 'shipped' | 'delivered' | 'cancelled';
   paymentStatus: 'pending' | 'completed' | 'failed' | 'cancelled';
   orderNumber?: string;

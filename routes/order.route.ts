@@ -7,12 +7,14 @@ import {
   updateOrderStatus,
   cancelOrder,
   getOrderStats,
+  getShippingQuote,
 } from '../controllers/order.controller.js';
 import { authenticate, authorizeAdmin } from '../middlewares/auth.js';
 
 const router: Router = express.Router();
 
 router.route('/create').post(createOrder);
+router.route('/shipping-quote').post(getShippingQuote);
 router.route('/user').get(authenticate, getUserOrders);
 router.route('/stats').get(authenticate, authorizeAdmin, getOrderStats);
 router.route('/:id').get(authenticate, getOrderById);

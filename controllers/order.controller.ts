@@ -6,6 +6,11 @@ import cacheService from '../services/cache.js';
 import logger, { logBusiness, logPerformance } from '../services/logger.js';
 import { AuthRequest, IOrder } from '../types/index.js';
 import { restoreProductInventory } from '../services/inventory.service.js';
+import {
+  calculateItemWeightKg,
+  calculateOtherProductShipping,
+  getShippingZone,
+} from '../services/shipping.service.js';
 
 export const createOrder = async (req: AuthRequest, res: Response): Promise<void> => {
   const startTime = Date.now();
@@ -68,6 +73,7 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
       await session.withTransaction(async () => {
         const validatedItems: any[] = [];
         let calculatedTotal = 0;
+        let totalWeightKg = 0;
         const productUpdates: Array<{
           productId: any;
           quantity: number;
@@ -140,7 +146,15 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
               measurement: matchedVariant.measurement,
               unit: matchedVariant.unit,
               image: matchedVariant.image || (product as any).image,
+              unitWeightKg: matchedVariant.unitWeightKg,
             };
+
+            const itemWeight = calculateItemWeightKg({
+              product: product as unknown as any,
+              variant: matchedVariant,
+              quantity: item.quantity,
+            });
+            totalWeightKg += itemWeight;
 
             validatedItems.push({
               product: (product as any)._id,
@@ -172,6 +186,12 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
             unitPrice = (product as any).price;
             lineItemName = item.name || (product as any).name;
 
+            const itemWeight = calculateItemWeightKg({
+              product: product as unknown as any,
+              quantity: item.quantity,
+            });
+            totalWeightKg += itemWeight;
+
             validatedItems.push({
               product: (product as any)._id,
               name: lineItemName,
@@ -196,12 +216,20 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
           throw new Error('Price mismatch detected');
         }
 
+        const zone = getShippingZone(shippingAddress);
+        const shippingResult = calculateOtherProductShipping(zone, totalWeightKg);
+        const grandTotal = calculatedTotal + shippingResult.shippingFee;
+
         const orderData: any = {
           orderItems: validatedItems,
           shippingAddress,
           paymentMethod,
           totalPrice: calculatedTotal,
-          totalAmount: calculatedTotal,
+          totalAmount: grandTotal,
+          shippingFee: shippingResult.shippingFee,
+          shippingZone: shippingResult.zone,
+          shippingWeightKg: shippingResult.totalWeightKg,
+          shippingBreakdown: shippingResult.breakdown,
           status: 'pending',
           paymentStatus: 'pending',
           isGuestOrder: isGuestOrder,
@@ -228,7 +256,7 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
 
         req.createdOrder = createdOrder as IOrder;
         req.productUpdates = productUpdates;
-        req.calculatedTotal = calculatedTotal;
+        req.calculatedTotal = grandTotal;
       });
 
       const createdOrder = req.createdOrder!;
@@ -328,6 +356,89 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
       success: false,
       message: 'Internal server error',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+    });
+  }
+};
+
+export const getShippingQuote = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { orderItems, shippingAddress } = req.body;
+
+    if (!orderItems || !Array.isArray(orderItems) || orderItems.length === 0) {
+      res.status(400).json({
+        success: false,
+        message: 'Order items are required to calculate shipping',
+      });
+      return;
+    }
+
+    if (!shippingAddress || !shippingAddress.address) {
+      res.status(400).json({
+        success: false,
+        message: 'Shipping address is required',
+      });
+      return;
+    }
+
+    const productIds = orderItems.map((item: any) => item.product);
+    const products = await Product.find({ _id: { $in: productIds } }).lean();
+    const productMap = new Map(
+      products.map((product) => [(product as any)._id.toString(), product])
+    );
+
+    let totalWeightKg = 0;
+
+    for (const item of orderItems) {
+      const productKey = (item.product as string)?.toString();
+      const product = productMap.get(productKey);
+      if (!product) {
+        throw new Error(`Product not found for shipping calculation: ${item.product}`);
+      }
+
+      if ((product as any).status !== 'active') {
+        throw new Error(`Product ${product.name} is not available`);
+      }
+
+      let variant: any = null;
+
+      if ((product as any).hasVariants && (product as any).variants?.length) {
+        if (!item.variantId) {
+          variant = (product as any).variants.find((v: any) => v.isDefault);
+        } else {
+          variant =
+            (product as any).variants.find(
+              (variantItem: any) => variantItem._id?.toString() === item.variantId?.toString()
+            ) || null;
+        }
+
+        if (!variant) {
+          throw new Error(`Variant not found for product ${product.name}`);
+        }
+      }
+
+      const weight = calculateItemWeightKg({
+        product: product as any,
+        variant,
+        quantity: item.quantity,
+      });
+      totalWeightKg += weight;
+    }
+
+    const zone = getShippingZone(shippingAddress);
+    const shippingResult = calculateOtherProductShipping(zone, totalWeightKg);
+
+    res.json({
+      success: true,
+      shippingFee: shippingResult.shippingFee,
+      totalWeightKg: shippingResult.totalWeightKg,
+      zone: shippingResult.zone,
+      breakdown: shippingResult.breakdown,
+    });
+  } catch (error: any) {
+    logger.error('Shipping quote error:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to calculate shipping',
     });
   }
 };

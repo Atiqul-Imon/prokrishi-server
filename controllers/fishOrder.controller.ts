@@ -4,6 +4,7 @@ import FishProduct from '../models/fishProduct.model.js';
 import mongoose from 'mongoose';
 import logger from '../services/logger.js';
 import { AuthRequest } from '../types/index.js';
+import { calculateFishShipping, getShippingZone } from '../services/shipping.service.js';
 
 // Get all fish orders
 export const getAllFishOrders = async (req: AuthRequest, res: Response): Promise<void> => {
@@ -236,6 +237,10 @@ export const createFishOrder = async (req: AuthRequest, res: Response): Promise<
         throw new Error('Price mismatch detected');
       }
 
+      const zone = getShippingZone(shippingAddress);
+      const shippingResult = calculateFishShipping(zone);
+      const grandTotal = calculatedTotal + shippingResult.shippingFee;
+
       // Create the order
       const fishOrder = new FishOrder({
         user: req.user?._id,
@@ -245,7 +250,10 @@ export const createFishOrder = async (req: AuthRequest, res: Response): Promise<
         shippingAddress,
         paymentMethod,
         totalPrice: calculatedTotal,
-        totalAmount: calculatedTotal,
+        totalAmount: grandTotal,
+        shippingFee: shippingResult.shippingFee,
+        shippingZone: shippingResult.zone,
+        shippingBreakdown: shippingResult.breakdown,
         status: 'pending',
         paymentStatus: 'pending',
         notes: notes?.trim(),

@@ -136,6 +136,18 @@ const fishOrderSchema = new Schema<IFishOrder>(
       required: true,
       default: 0.0,
     },
+    shippingFee: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    shippingZone: {
+      type: String,
+      enum: ['inside_dhaka', 'outside_dhaka'],
+    },
+    shippingBreakdown: {
+      type: Object,
+    },
     status: {
       type: String,
       required: true,

@@ -39,6 +39,10 @@ const productVariantSchema = new Schema(
       type: String,
       enum: ['pcs', 'kg', 'g', 'l', 'ml'],
     },
+    unitWeightKg: {
+      type: Number,
+      min: 0,
+    },
     status: {
       type: String,
       enum: ['active', 'inactive', 'out_of_stock'],
@@ -94,6 +98,10 @@ const productSchema = new Schema<IProduct>(
       required: true,
       enum: ['pcs', 'kg', 'g', 'l', 'ml'],
       default: 'pcs',
+    },
+    unitWeightKg: {
+      type: Number,
+      min: 0,
     },
     measurementIncrement: {
       type: Number,

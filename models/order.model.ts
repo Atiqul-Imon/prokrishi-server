@@ -68,6 +68,23 @@ const orderSchema = new Schema<IOrder>(
       required: true,
       default: 0.0,
     },
+    shippingFee: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    shippingZone: {
+      type: String,
+      enum: ['inside_dhaka', 'outside_dhaka'],
+    },
+    shippingWeightKg: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    shippingBreakdown: {
+      type: Object,
+    },
     status: {
       type: String,
       required: true,

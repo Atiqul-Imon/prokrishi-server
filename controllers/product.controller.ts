@@ -151,6 +151,10 @@ const normalizeVariants = (
       stock,
       measurement,
       unit,
+      unitWeightKg:
+        variant?.unitWeightKg !== undefined && variant?.unitWeightKg !== null
+          ? Number(variant.unitWeightKg)
+          : undefined,
       status: variant?.status || (stock > 0 ? 'active' : 'out_of_stock'),
       isDefault: Boolean(variant?.isDefault),
       image: variant?.image || fallback.image,
@@ -188,6 +192,7 @@ export const createProduct = async (req: AuthRequest, res: Response): Promise<vo
       measurement,
       unit,
       measurementIncrement,
+      unitWeightKg,
       shortDescription,
       metaTitle,
       metaDescription,
@@ -249,6 +254,10 @@ export const createProduct = async (req: AuthRequest, res: Response): Promise<vo
       stock: aggregateStock,
       measurement: defaultVariant.measurement ?? 1,
       unit: defaultVariant.unit ?? 'pcs',
+      unitWeightKg:
+        unitWeightKg !== undefined
+          ? Number(unitWeightKg)
+          : defaultVariant.unitWeightKg ?? undefined,
       measurementIncrement: measurementIncrement ?? 0.01,
       lowStockThreshold: lowStockThreshold ?? 5,
       status,
@@ -642,6 +651,7 @@ export const updateProduct = async (req: AuthRequest, res: Response): Promise<vo
       lowStockThreshold,
       isFeatured,
       measurementIncrement,
+      unitWeightKg,
       shortDescription,
       metaTitle,
       metaDescription,
@@ -664,6 +674,8 @@ export const updateProduct = async (req: AuthRequest, res: Response): Promise<vo
       description,
       measurement,
       unit,
+      unitWeightKg:
+        unitWeightKg !== undefined ? Number(unitWeightKg) : undefined,
       lowStockThreshold,
       isFeatured,
       measurementIncrement,
