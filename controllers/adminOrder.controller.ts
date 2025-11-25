@@ -19,92 +19,134 @@ export const getAllOrders = async (req: AuthRequest, res: Response): Promise<voi
       sortOrder = 'desc',
     } = req.query;
 
-    const filter: any = {};
+    const parsedPage = Math.max(Number(page) || 1, 1);
+    const parsedLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+
+    const matchFilters: any = {};
 
     if (status) {
-      filter.status = status;
+      matchFilters.status = status;
     }
 
     if (paymentStatus) {
-      filter.paymentStatus = paymentStatus;
+      matchFilters.paymentStatus = paymentStatus;
     }
 
     if (dateFrom || dateTo) {
-      filter.createdAt = {};
+      matchFilters.createdAt = {};
       if (dateFrom) {
-        filter.createdAt.$gte = new Date(dateFrom as string);
+        matchFilters.createdAt.$gte = new Date(dateFrom as string);
       }
       if (dateTo) {
-        filter.createdAt.$lte = new Date(dateTo as string);
+        matchFilters.createdAt.$lte = new Date(dateTo as string);
       }
     }
 
-    const sort: any = {};
-    sort[sortBy as string] = sortOrder === 'desc' ? -1 : 1;
+    const sortStage: any = {
+      [sortBy as string]: sortOrder === 'desc' ? -1 : 1,
+      _id: -1,
+    };
 
-    const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
+    const basePipeline: any[] = [];
 
-    let pipeline: any[] = [
+    if (Object.keys(matchFilters).length > 0) {
+      basePipeline.push({ $match: matchFilters });
+    }
+
+    basePipeline.push(
       {
         $lookup: {
           from: 'users',
           localField: 'user',
           foreignField: '_id',
           as: 'userInfo',
+          pipeline: [
+            {
+              $project: {
+                _id: 1,
+                name: 1,
+                email: 1,
+                phone: 1,
+              },
+            },
+          ],
         },
       },
       {
-        $unwind: '$userInfo',
+        $unwind: {
+          path: '$userInfo',
+          preserveNullAndEmptyArrays: true,
+        },
       },
-    ];
+      {
+        $addFields: {
+          userInfo: {
+            $cond: [
+              { $ifNull: ['$userInfo', false] },
+              '$userInfo',
+              {
+                name: { $ifNull: ['$guestInfo.name', 'Guest'] },
+                email: '$guestInfo.email',
+                phone: '$guestInfo.phone',
+              },
+            ],
+          },
+          orderIdStr: { $toString: '$_id' },
+        },
+      }
+    );
 
     if (search) {
-      pipeline.push({
+      const searchRegex = new RegExp(search as string, 'i');
+      basePipeline.push({
         $match: {
           $or: [
-            { _id: { $regex: search, $options: 'i' } },
-            { 'userInfo.name': { $regex: search, $options: 'i' } },
-            { 'userInfo.email': { $regex: search, $options: 'i' } },
-            { 'userInfo.phone': { $regex: search, $options: 'i' } },
+            { orderIdStr: searchRegex },
+            { 'userInfo.name': searchRegex },
+            { 'userInfo.email': searchRegex },
+            { 'userInfo.phone': searchRegex },
+            { 'shippingAddress.name': searchRegex },
+            { 'shippingAddress.phone': searchRegex },
           ],
         },
       });
     }
 
-    if (Object.keys(filter).length > 0) {
-      pipeline.push({ $match: filter });
-    }
+    const ordersPipeline = [
+      ...basePipeline,
+      { $sort: sortStage },
+      { $skip: (parsedPage - 1) * parsedLimit },
+      { $limit: parsedLimit },
+      { $project: { orderIdStr: 0 } },
+    ];
 
-    pipeline.push({ $sort: sort }, { $skip: skip }, { $limit: parseInt(limit as string) });
+    const countPipeline = [...basePipeline, { $count: 'total' }];
 
-    const orders = await Order.aggregate(pipeline);
-
-    const countPipeline = [...pipeline];
-    countPipeline.splice(-3);
-    countPipeline.push({ $count: 'total' });
-    const countResult = await Order.aggregate(countPipeline);
+    const [orders, countResult] = await Promise.all([
+      Order.aggregate(ordersPipeline),
+      Order.aggregate(countPipeline),
+    ]);
     const total = countResult[0]?.total || 0;
-
-    const totalPages = Math.ceil(total / parseInt(limit as string));
-    const hasNextPage = parseInt(page as string) < totalPages;
-    const hasPrevPage = parseInt(page as string) > 1;
+    const totalPages = Math.max(Math.ceil(total / parsedLimit), 1);
+    const hasNextPage = parsedPage < totalPages;
+    const hasPrevPage = parsedPage > 1;
 
     logPerformance('getAllOrders', Date.now() - startTime, {
       total,
-      page,
-      limit,
+      page: parsedPage,
+      limit: parsedLimit,
     });
 
     res.status(200).json({
       success: true,
       orders,
       pagination: {
-        currentPage: parseInt(page as string),
+        currentPage: parsedPage,
         totalPages,
         totalOrders: total,
         hasNextPage,
         hasPrevPage,
-        limit: parseInt(limit as string),
+        limit: parsedLimit,
       },
     });
   } catch (error: any) {
