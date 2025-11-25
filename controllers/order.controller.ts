@@ -362,7 +362,7 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
 
 export const getShippingQuote = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { orderItems, shippingAddress } = req.body;
+    const { orderItems, shippingAddress, shippingZone } = req.body;
 
     if (!orderItems || !Array.isArray(orderItems) || orderItems.length === 0) {
       res.status(400).json({
@@ -380,51 +380,113 @@ export const getShippingQuote = async (req: AuthRequest, res: Response): Promise
       return;
     }
 
-    const productIds = orderItems.map((item: any) => item.product);
+    // Validate order items structure
+    const validOrderItems = orderItems.filter((item: any) => 
+      item && item.product && (typeof item.quantity === 'number' && item.quantity > 0)
+    );
+
+    if (validOrderItems.length === 0) {
+      res.status(400).json({
+        success: false,
+        message: 'Valid order items with products and quantities are required',
+      });
+      return;
+    }
+
+    const productIds = validOrderItems.map((item: any) => item.product).filter(Boolean);
+    
+    if (productIds.length === 0) {
+      res.status(400).json({
+        success: false,
+        message: 'At least one valid product ID is required',
+      });
+      return;
+    }
+
     const products = await Product.find({ _id: { $in: productIds } }).lean();
+    
+    if (products.length !== productIds.length) {
+      res.status(400).json({
+        success: false,
+        message: 'One or more products not found',
+      });
+      return;
+    }
+
     const productMap = new Map(
       products.map((product) => [(product as any)._id.toString(), product])
     );
 
     let totalWeightKg = 0;
 
-    for (const item of orderItems) {
-      const productKey = (item.product as string)?.toString();
+    for (const item of validOrderItems) {
+      const productKey = String(item.product);
       const product = productMap.get(productKey);
+      
       if (!product) {
-        throw new Error(`Product not found for shipping calculation: ${item.product}`);
+        res.status(400).json({
+          success: false,
+          message: `Product not found: ${item.product}`,
+        });
+        return;
       }
 
       if ((product as any).status !== 'active') {
-        throw new Error(`Product ${product.name} is not available`);
+        res.status(400).json({
+          success: false,
+          message: `Product ${(product as any).name} is not available`,
+        });
+        return;
+      }
+
+      // Validate quantity
+      const quantity = Number(item.quantity);
+      if (!quantity || quantity <= 0 || !Number.isInteger(quantity)) {
+        res.status(400).json({
+          success: false,
+          message: `Invalid quantity for product ${(product as any).name}`,
+        });
+        return;
       }
 
       let variant: any = null;
 
-      if ((product as any).hasVariants && (product as any).variants?.length) {
-        if (!item.variantId) {
-          variant = (product as any).variants.find((v: any) => v.isDefault);
+      if ((product as any).hasVariants && Array.isArray((product as any).variants) && (product as any).variants.length > 0) {
+        if (item.variantId) {
+          variant = (product as any).variants.find(
+            (variantItem: any) => String(variantItem._id) === String(item.variantId)
+          ) || null;
         } else {
-          variant =
-            (product as any).variants.find(
-              (variantItem: any) => variantItem._id?.toString() === item.variantId?.toString()
-            ) || null;
+          variant = (product as any).variants.find((v: any) => v.isDefault) || null;
         }
 
-        if (!variant) {
-          throw new Error(`Variant not found for product ${product.name}`);
+        if (!variant && (product as any).hasVariants) {
+          res.status(400).json({
+            success: false,
+            message: `Variant not found for product ${(product as any).name}`,
+          });
+          return;
         }
       }
 
       const weight = calculateItemWeightKg({
         product: product as any,
         variant,
-        quantity: item.quantity,
+        quantity,
       });
       totalWeightKg += weight;
     }
 
-    const zone = getShippingZone(shippingAddress);
+    // Validate and use provided zone - zone selection is mandatory, no auto-detection
+    if (typeof shippingZone !== 'string' || (shippingZone !== 'inside_dhaka' && shippingZone !== 'outside_dhaka')) {
+      res.status(400).json({
+        success: false,
+        message: 'Valid shipping zone (inside_dhaka or outside_dhaka) is required',
+      });
+      return;
+    }
+    const zone: 'inside_dhaka' | 'outside_dhaka' = shippingZone;
+
     const shippingResult = calculateOtherProductShipping(zone, totalWeightKg);
 
     res.json({
