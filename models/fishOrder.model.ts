@@ -35,6 +35,9 @@ export interface IFishOrder {
   paymentMethod: string;
   totalPrice: number;
   totalAmount: number;
+  shippingFee?: number;
+  shippingZone?: 'inside_dhaka' | 'outside_dhaka';
+  shippingBreakdown?: Record<string, any>;
   status: 'pending' | 'confirmed' | 'processing' | 'prepared' | 'shipped' | 'delivered' | 'cancelled';
   paymentStatus: 'pending' | 'completed' | 'failed' | 'cancelled';
   orderNumber?: string;
