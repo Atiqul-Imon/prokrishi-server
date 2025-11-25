@@ -56,6 +56,27 @@ const uploadToImageKit = (
   });
 };
 
+const parseVariantsPayload = (variantsRaw: any): any[] | undefined => {
+  if (variantsRaw === undefined) {
+    return undefined;
+  }
+
+  if (typeof variantsRaw === 'string') {
+    try {
+      const parsed = JSON.parse(variantsRaw);
+      return parsed;
+    } catch (error) {
+      throw new Error('Invalid variants format. Expecting JSON array.');
+    }
+  }
+
+  if (Array.isArray(variantsRaw)) {
+    return variantsRaw;
+  }
+
+  throw new Error('Invalid variants format. Expecting array.');
+};
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const normalizeVariants = (
   body: any,
@@ -194,8 +215,19 @@ export const createProduct = async (req: AuthRequest, res: Response): Promise<vo
       imageUrl = req.body.image;
     }
 
+    let variantsPayload: any[] | undefined;
+    try {
+      variantsPayload = parseVariantsPayload(req.body?.variants);
+    } catch (error: any) {
+      res.status(400).json({
+        message: error.message,
+        success: false,
+      });
+      return;
+    }
+
     const variants = normalizeVariants(
-      req.body,
+      { variants: variantsPayload },
       {
         price: price !== undefined ? Number(price) : undefined,
         salePrice: salePrice !== undefined ? Number(salePrice) : undefined,
@@ -659,12 +691,23 @@ export const updateProduct = async (req: AuthRequest, res: Response): Promise<vo
     }
 
     if (variantPayload !== undefined) {
+      let parsedVariants: any[] | undefined;
+      try {
+        parsedVariants = parseVariantsPayload(variantPayload);
+      } catch (error: any) {
+        res.status(400).json({
+          message: error.message,
+          success: false,
+        });
+        return;
+      }
+
       const fallbackVariant =
         existingProduct.variants?.find((variant: any) => variant.isDefault) ||
         existingProduct.variants?.[0];
 
       const normalizedVariants = normalizeVariants(
-        { variants: variantPayload },
+        { variants: parsedVariants },
         {
           price:
             price !== undefined
