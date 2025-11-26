@@ -1,5 +1,4 @@
 import { Response } from 'express';
-import type { Express } from 'express';
 import Product from '../models/product.model.js';
 import FishProduct from '../models/fishProduct.model.js';
 import Category from '../models/category.model.js';
