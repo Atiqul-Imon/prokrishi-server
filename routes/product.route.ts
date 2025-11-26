@@ -39,8 +39,13 @@ productRouter.get('/category/slug/:slug', getProductsByCategorySlug);
 productRouter.get('/:id/related', getRelatedProducts);
 productRouter.get('/:id', getProductById);
 
-productRouter.post('/create', authenticate, authorizeAdmin, upload.single('image'), createProduct);
-productRouter.put('/:id', authenticate, authorizeAdmin, upload.single('image'), updateProduct);
+const productUpload = upload.fields([
+  { name: 'image', maxCount: 1 },
+  { name: 'galleryImages', maxCount: 10 },
+]);
+
+productRouter.post('/create', authenticate, authorizeAdmin, productUpload, createProduct);
+productRouter.put('/:id', authenticate, authorizeAdmin, productUpload, updateProduct);
 productRouter.delete('/:id', authenticate, authorizeAdmin, deleteProduct);
 productRouter.patch('/:id/toggle-featured', authenticate, authorizeAdmin, toggleProductFeatured);
 

@@ -134,6 +134,10 @@ const productSchema = new Schema<IProduct>(
       type: String,
       default: '',
     },
+    images: {
+      type: [String],
+      default: [],
+    },
     description: {
       type: String,
       default: '',
@@ -292,6 +296,25 @@ productSchema.pre('validate', function (this: IProduct, next) {
       doc.defaultVariantId = null;
       doc.variantSummary = undefined;
     }
+
+    const primaryImage = doc.image;
+    const galleryImages = Array.isArray(doc.images) ? doc.images : [];
+    const seenImages = new Set<string>();
+    const normalizedImages: string[] = [];
+
+    if (primaryImage) {
+      normalizedImages.push(primaryImage);
+      seenImages.add(primaryImage);
+    }
+
+    galleryImages.forEach((img: string) => {
+      if (img && !seenImages.has(img)) {
+        normalizedImages.push(img);
+        seenImages.add(img);
+      }
+    });
+
+    doc.images = normalizedImages;
   } catch (error) {
     return next(error as Error);
   }

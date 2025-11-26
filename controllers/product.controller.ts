@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import type { Express } from 'express';
 import Product from '../models/product.model.js';
 import FishProduct from '../models/fishProduct.model.js';
 import Category from '../models/category.model.js';
@@ -179,6 +180,88 @@ const normalizeVariants = (
   return variants;
 };
 
+type ProductUploadFiles = {
+  image?: Express.Multer.File[];
+  galleryImages?: Express.Multer.File[];
+};
+
+const parseStringArrayField = (value: any): string[] => {
+  if (value === undefined || value === null) {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean);
+  }
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((item: any) => (typeof item === 'string' ? item.trim() : ''))
+          .filter(Boolean);
+      }
+    } catch {
+      return value
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+  }
+
+  return [];
+};
+
+const buildImagePayload = (primary?: string, gallery: string[] = []) => {
+  const sanitizedPrimary = typeof primary === 'string' ? primary.trim() : '';
+  const sanitizedGallery = gallery
+    .map((img) => (typeof img === 'string' ? img.trim() : ''))
+    .filter(Boolean);
+
+  let hero = sanitizedPrimary;
+  const galleryQueue = [...sanitizedGallery];
+
+  if (!hero && galleryQueue.length > 0) {
+    hero = galleryQueue.shift() as string;
+  }
+
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+
+  if (hero) {
+    ordered.push(hero);
+    seen.add(hero);
+  }
+
+  galleryQueue.forEach((img) => {
+    if (img && !seen.has(img)) {
+      ordered.push(img);
+      seen.add(img);
+    }
+  });
+
+  return {
+    hero,
+    images: ordered,
+  };
+};
+
+const uploadAdditionalImages = async (files: Express.Multer.File[] = []) => {
+  if (!files.length) {
+    return [];
+  }
+
+  const uploads = files.map(async (file) => {
+    const uploadResult = await uploadToImageKit(file.buffer, file.originalname);
+    return uploadResult.url;
+  });
+
+  return Promise.all(uploads);
+};
+
 export const createProduct = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const {
@@ -213,12 +296,25 @@ export const createProduct = async (req: AuthRequest, res: Response): Promise<vo
       return;
     }
 
-    if (req.file) {
-      const uploadResult = await uploadToImageKit(req.file.buffer, req.file.originalname);
+    const filePayload = (req.files as ProductUploadFiles) || {};
+    const primaryUpload = Array.isArray(filePayload?.image) ? filePayload.image[0] : undefined;
+    const galleryUploads = Array.isArray(filePayload?.galleryImages)
+      ? filePayload.galleryImages
+      : [];
+
+    if (primaryUpload) {
+      const uploadResult = await uploadToImageKit(primaryUpload.buffer, primaryUpload.originalname);
       imageUrl = uploadResult.url;
     } else if (req.body.image) {
       imageUrl = req.body.image;
     }
+
+    const galleryUploadUrls = await uploadAdditionalImages(galleryUploads);
+    const existingGallery = parseStringArrayField(req.body.existingGallery);
+    const manualGallery = parseStringArrayField(req.body.images);
+    const combinedGallery = [...existingGallery, ...manualGallery, ...galleryUploadUrls];
+    const imagePayload = buildImagePayload(imageUrl, combinedGallery);
+    imageUrl = imagePayload.hero;
 
     let variantsPayload: any[] | undefined;
     try {
@@ -231,6 +327,8 @@ export const createProduct = async (req: AuthRequest, res: Response): Promise<vo
       return;
     }
 
+    const productImages = imagePayload.images;
+
     const variants = normalizeVariants(
       { variants: variantsPayload },
       {
@@ -239,7 +337,7 @@ export const createProduct = async (req: AuthRequest, res: Response): Promise<vo
         stock: stock !== undefined ? Number(stock) : undefined,
         measurement: measurement !== undefined ? Number(measurement) : undefined,
         unit,
-        image: imageUrl,
+        image: imagePayload.hero,
       },
       name
     );
@@ -267,6 +365,7 @@ export const createProduct = async (req: AuthRequest, res: Response): Promise<vo
       metaDescription,
       tags,
       image: imageUrl,
+      images: productImages,
       variants,
       hasVariants: variants.length > 0,
     });
@@ -340,6 +439,7 @@ export const getAllProducts = async (req: AuthRequest, res: Response): Promise<v
           stock: totalStock,
           measurement: 1,
           unit: 'kg',
+          images: fp.image ? [fp.image] : [],
           hasVariants: fp.sizeCategories.length > 1,
           variants: fp.sizeCategories.map((sc: any) => ({
             _id: sc._id,
@@ -578,6 +678,7 @@ export const getProductById = async (req: AuthRequest, res: Response): Promise<v
           stock: totalStock,
           measurement: 1,
           unit: 'kg',
+          images: fishProduct.image ? [fishProduct.image] : [],
           hasVariants: (fishProduct as any).sizeCategories.length > 1,
           variants: (fishProduct as any).sizeCategories.map((sc: any) => ({
             _id: sc._id,
@@ -695,12 +796,34 @@ export const updateProduct = async (req: AuthRequest, res: Response): Promise<vo
       }
     }
 
-    if (req.file) {
-      const uploadResult = await uploadToImageKit(req.file.buffer, req.file.originalname);
+    const filePayload = (req.files as ProductUploadFiles) || {};
+    const primaryUpload = Array.isArray(filePayload?.image) ? filePayload.image[0] : undefined;
+    const galleryUploads = Array.isArray(filePayload?.galleryImages)
+      ? filePayload.galleryImages
+      : [];
+
+    if (primaryUpload) {
+      const uploadResult = await uploadToImageKit(primaryUpload.buffer, primaryUpload.originalname);
       updateData.image = uploadResult.url;
-    } else if (req.body.image) {
-      updateData.image = req.body.image;
     }
+
+    const galleryUploadUrls = await uploadAdditionalImages(galleryUploads);
+    const galleryFieldProvided = Object.prototype.hasOwnProperty.call(req.body, 'existingGallery');
+    const parsedExistingGallery = galleryFieldProvided
+      ? parseStringArrayField(req.body.existingGallery)
+      : undefined;
+    const fallbackExistingGallery =
+      (existingProduct as any).images?.filter((img: string) => img && img !== (existingProduct as any).image) ??
+      [];
+    const combinedGallery = [
+      ...(parsedExistingGallery !== undefined ? parsedExistingGallery : fallbackExistingGallery),
+      ...galleryUploadUrls,
+    ];
+    const imagePayload = buildImagePayload(updateData.image ?? (existingProduct as any).image, combinedGallery);
+    if (imagePayload.hero) {
+      updateData.image = imagePayload.hero;
+    }
+    updateData.images = imagePayload.images;
 
     if (variantPayload !== undefined) {
       let parsedVariants: any[] | undefined;
