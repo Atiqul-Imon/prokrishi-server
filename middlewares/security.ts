@@ -58,24 +58,18 @@ const identifyAdminRequest = (req: Request): boolean => {
   }
 };
 
-const defaultAdminRateLimit = createRateLimit(
-  15 * 60 * 1000,
-  200,
-  'Too many admin requests, please try again later'
-);
-
-const relaxedAdminRateLimit = createRateLimit(
-  15 * 60 * 1000,
-  1200,
-  'Too many admin requests, please try again later'
-);
-
-export const adminRateLimit: RateLimitRequestHandler = (req, res, next) => {
-  if (identifyAdminRequest(req)) {
-    return relaxedAdminRateLimit(req, res, next);
-  }
-  return defaultAdminRateLimit(req, res, next);
-};
+export const adminRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  skip: (req: Request) => identifyAdminRequest(req),
+  message: {
+    error: true,
+    message: 'Too many admin requests, please try again later',
+    success: false,
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 export const profileRateLimit = createRateLimit(
   15 * 60 * 1000,
   50,
