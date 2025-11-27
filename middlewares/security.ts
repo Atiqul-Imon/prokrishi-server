@@ -2,7 +2,9 @@ import { Request, Response, NextFunction } from 'express';
 import rateLimit, { RateLimitRequestHandler } from 'express-rate-limit';
 import helmet from 'helmet';
 import { validationResult } from 'express-validator';
+import jwt from 'jsonwebtoken';
 import logger from '../services/logger.js';
+import { JWTPayload } from '../types/index.js';
 
 export const createRateLimit = (
   windowMs: number = 15 * 60 * 1000,
@@ -37,11 +39,43 @@ export const strictRateLimit = createRateLimit(
   10,
   'Too many requests, please try again later'
 );
-export const adminRateLimit = createRateLimit(
+const identifyAdminRequest = (req: Request): boolean => {
+  const token =
+    req.cookies?.accessToken ||
+    (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')
+      ? req.headers.authorization.split(' ')[1]
+      : null);
+
+  if (!token || !process.env.JWT_SECRET) {
+    return false;
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET) as JWTPayload;
+    return decoded.role === 'admin' || decoded.role === 'super_admin';
+  } catch {
+    return false;
+  }
+};
+
+const defaultAdminRateLimit = createRateLimit(
   15 * 60 * 1000,
   200,
   'Too many admin requests, please try again later'
 );
+
+const relaxedAdminRateLimit = createRateLimit(
+  15 * 60 * 1000,
+  1200,
+  'Too many admin requests, please try again later'
+);
+
+export const adminRateLimit: RateLimitRequestHandler = (req, res, next) => {
+  if (identifyAdminRequest(req)) {
+    return relaxedAdminRateLimit(req, res, next);
+  }
+  return defaultAdminRateLimit(req, res, next);
+};
 export const profileRateLimit = createRateLimit(
   15 * 60 * 1000,
   50,
