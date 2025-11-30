@@ -10,6 +10,7 @@ import { restoreProductInventory } from '../services/inventory.service.js';
 import {
   calculateItemWeightKg,
   calculateOtherProductShipping,
+  calculateFishShipping,
   getShippingZone,
 } from '../services/shipping.service.js';
 
@@ -446,7 +447,18 @@ export const getShippingQuote = async (req: AuthRequest, res: Response): Promise
     });
 
     // Combine regular and fish products
-    const products = [...regularProducts, ...convertedFishProducts];
+    // Remove duplicates (in case a product ID exists in both collections, prioritize regular product)
+    const productMap = new Map<string, any>();
+    regularProducts.forEach((p: any) => {
+      productMap.set(p._id.toString(), p);
+    });
+    convertedFishProducts.forEach((p: any) => {
+      // Only add if not already in map (regular products take priority)
+      if (!productMap.has(p._id.toString())) {
+        productMap.set(p._id.toString(), p);
+      }
+    });
+    const products = Array.from(productMap.values());
     
     if (products.length !== productIds.length) {
       res.status(400).json({
@@ -455,10 +467,6 @@ export const getShippingQuote = async (req: AuthRequest, res: Response): Promise
       });
       return;
     }
-
-    const productMap = new Map(
-      products.map((product) => [(product as any)._id.toString(), product])
-    );
 
     let totalWeightKg = 0;
 
@@ -570,14 +578,59 @@ export const getShippingQuote = async (req: AuthRequest, res: Response): Promise
     }
     const zone: 'inside_dhaka' | 'outside_dhaka' = shippingZone;
 
-    const shippingResult = calculateOtherProductShipping(zone, totalWeightKg);
+    // Separate fish products from regular products for shipping calculation
+    let regularProductWeight = 0;
+    let hasFishProducts = false;
+    
+    for (const item of validOrderItems) {
+      const productKey = String(item.product);
+      const product = productMap.get(productKey);
+      if (product && (product as any).isFishProduct === true) {
+        hasFishProducts = true;
+        // Fish products don't contribute to weight-based shipping calculation
+        // They use flat fee shipping calculated on backend
+      } else {
+        // Calculate weight for regular products only
+        const quantity = Number(item.quantity);
+        let variant: any = null;
+        if ((product as any).hasVariants && Array.isArray((product as any).variants) && (product as any).variants.length > 0) {
+          if (item.variantId) {
+            variant = (product as any).variants.find(
+              (variantItem: any) => String(variantItem._id) === String(item.variantId)
+            ) || null;
+          } else {
+            variant = (product as any).variants.find((v: any) => v.isDefault) || null;
+          }
+        }
+        const weight = calculateItemWeightKg({
+          product: product as any,
+          variant,
+          quantity,
+        });
+        regularProductWeight += weight;
+      }
+    }
+
+    // Calculate shipping separately for regular and fish products
+    const regularShipping = calculateOtherProductShipping(zone, regularProductWeight);
+    const fishShipping = hasFishProducts ? calculateFishShipping(zone) : null;
+    
+    // Combine shipping fees for display
+    // Note: Fish orders will calculate their own shipping on backend, this is just for quote
+    const totalShippingFee = regularShipping.shippingFee + (fishShipping?.shippingFee || 0);
 
     res.json({
       success: true,
-      shippingFee: shippingResult.shippingFee,
-      totalWeightKg: shippingResult.totalWeightKg,
-      zone: shippingResult.zone,
-      breakdown: shippingResult.breakdown,
+      shippingFee: totalShippingFee,
+      totalWeightKg: totalWeightKg,
+      zone: zone,
+      breakdown: {
+        regularShippingFee: regularShipping.shippingFee,
+        fishShippingFee: fishShipping?.shippingFee || 0,
+        regularBreakdown: regularShipping.breakdown,
+        fishBreakdown: fishShipping?.breakdown || null,
+        totalFee: totalShippingFee,
+      },
     });
   } catch (error: any) {
     logger.error('Shipping quote error:', error);
