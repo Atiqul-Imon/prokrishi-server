@@ -2,6 +2,7 @@ import { Response } from 'express';
 import mongoose from 'mongoose';
 import Order from '../models/order.model.js';
 import Product from '../models/product.model.js';
+import FishProduct from '../models/fishProduct.model.js';
 import cacheService from '../services/cache.js';
 import logger, { logBusiness, logPerformance } from '../services/logger.js';
 import { AuthRequest, IOrder } from '../types/index.js';
@@ -403,7 +404,49 @@ export const getShippingQuote = async (req: AuthRequest, res: Response): Promise
       return;
     }
 
-    const products = await Product.find({ _id: { $in: productIds } }).lean();
+    // Check both Product and FishProduct models
+    const [regularProducts, fishProducts] = await Promise.all([
+      Product.find({ _id: { $in: productIds } }).lean(),
+      FishProduct.find({ _id: { $in: productIds } }).lean(),
+    ]);
+
+    // Convert fish products to regular product format for compatibility
+    const convertedFishProducts = fishProducts.map((fp: any) => {
+      const defaultSizeCat = fp.sizeCategories?.find((sc: any) => sc.isDefault) || fp.sizeCategories?.[0];
+      const totalStock = fp.sizeCategories?.reduce((sum: number, sc: any) => sum + (sc.stock || 0), 0) || 0;
+      const minPrice = fp.sizeCategories?.length > 0 
+        ? Math.min(...fp.sizeCategories.map((sc: any) => sc.pricePerKg))
+        : 0;
+      const maxPrice = fp.sizeCategories?.length > 0
+        ? Math.max(...fp.sizeCategories.map((sc: any) => sc.pricePerKg))
+        : 0;
+
+      return {
+        ...fp,
+        _id: fp._id,
+        price: defaultSizeCat?.pricePerKg || minPrice,
+        stock: totalStock,
+        measurement: 1,
+        unit: 'kg',
+        images: fp.image ? [fp.image] : [],
+        hasVariants: (fp.sizeCategories?.length || 0) > 1,
+        variants: fp.sizeCategories?.map((sc: any) => ({
+          _id: sc._id,
+          label: sc.label,
+          price: sc.pricePerKg,
+          stock: sc.stock || 0,
+          measurement: 1,
+          unit: 'kg',
+          status: sc.status,
+          isDefault: sc.isDefault,
+        })) || [],
+        priceRange: { min: minPrice, max: maxPrice },
+        isFishProduct: true,
+      };
+    });
+
+    // Combine regular and fish products
+    const products = [...regularProducts, ...convertedFishProducts];
     
     if (products.length !== productIds.length) {
       res.status(400).json({
@@ -439,9 +482,11 @@ export const getShippingQuote = async (req: AuthRequest, res: Response): Promise
         return;
       }
 
-      // Validate quantity
+      // Validate quantity (for fish products, quantity is weight in kg, so allow decimals)
       const quantity = Number(item.quantity);
-      if (!quantity || quantity <= 0 || !Number.isInteger(quantity)) {
+      const isFishProduct = (product as any).isFishProduct === true;
+      
+      if (!quantity || quantity <= 0) {
         res.status(400).json({
           success: false,
           message: `Invalid quantity for product ${(product as any).name}`,
@@ -449,9 +494,39 @@ export const getShippingQuote = async (req: AuthRequest, res: Response): Promise
         return;
       }
 
+      // For regular products, quantity should be integer
+      if (!isFishProduct && !Number.isInteger(quantity)) {
+        res.status(400).json({
+          success: false,
+          message: `Quantity must be a whole number for product ${(product as any).name}`,
+        });
+        return;
+      }
+
       let variant: any = null;
 
-      if ((product as any).hasVariants && Array.isArray((product as any).variants) && (product as any).variants.length > 0) {
+      if (isFishProduct) {
+        // Handle fish products with sizeCategories
+        const sizeCategories = (product as any).sizeCategories || [];
+        if (sizeCategories.length > 0) {
+          if (item.variantId) {
+            variant = sizeCategories.find(
+              (sc: any) => String(sc._id) === String(item.variantId)
+            ) || null;
+          } else {
+            variant = sizeCategories.find((sc: any) => sc.isDefault) || sizeCategories[0] || null;
+          }
+
+          if (!variant) {
+            res.status(400).json({
+              success: false,
+              message: `Size category not found for product ${(product as any).name}`,
+            });
+            return;
+          }
+        }
+      } else if ((product as any).hasVariants && Array.isArray((product as any).variants) && (product as any).variants.length > 0) {
+        // Handle regular products with variants
         if (item.variantId) {
           variant = (product as any).variants.find(
             (variantItem: any) => String(variantItem._id) === String(item.variantId)
@@ -469,11 +544,19 @@ export const getShippingQuote = async (req: AuthRequest, res: Response): Promise
         }
       }
 
-      const weight = calculateItemWeightKg({
-        product: product as any,
-        variant,
-        quantity,
-      });
+      // Calculate weight - for fish products, quantity is already in kg
+      let weight: number;
+      if (isFishProduct) {
+        // For fish products, quantity is the weight in kg
+        weight = quantity;
+      } else {
+        // For regular products, use the weight calculation function
+        weight = calculateItemWeightKg({
+          product: product as any,
+          variant,
+          quantity,
+        });
+      }
       totalWeightKg += weight;
     }
 
