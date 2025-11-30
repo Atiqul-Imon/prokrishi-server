@@ -126,11 +126,38 @@ const orderSchema = new Schema<IOrder>(
     deliveredAt: {
       type: Date,
     },
+    invoiceNumber: {
+      type: String,
+      unique: true,
+      trim: true,
+    },
   },
   {
     timestamps: true,
   }
 );
+
+// Pre-save hook to generate invoice number
+orderSchema.pre('save', async function (next) {
+  try {
+    const doc = this as any;
+    
+    if (this.isNew && !doc.invoiceNumber) {
+      const date = new Date();
+      const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '');
+      const randomPart = Math.random().toString(36).substring(2, 8).toUpperCase();
+      doc.invoiceNumber = `INV-${dateStr}-${randomPart}`;
+    }
+  } catch (error) {
+    return next(error as Error);
+  }
+  next();
+});
+
+// Indexes
+orderSchema.index({ invoiceNumber: 1 });
+orderSchema.index({ user: 1, createdAt: -1 });
+orderSchema.index({ status: 1, createdAt: -1 });
 
 const Order: Model<IOrder> = mongoose.model<IOrder>('Order', orderSchema);
 

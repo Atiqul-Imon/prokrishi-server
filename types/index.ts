@@ -198,6 +198,7 @@ export interface IOrder extends Document {
   paidAt?: Date;
   isDelivered: boolean;
   deliveredAt?: Date;
+  invoiceNumber?: string;
   createdAt: Date;
   updatedAt: Date;
 }

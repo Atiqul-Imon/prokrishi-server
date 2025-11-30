@@ -17,6 +17,7 @@ import adminOrderRouter from './routes/adminOrder.route.js';
 import mediaRouter from './routes/media.route.js';
 import fishProductRouter from './routes/fishProduct.route.js';
 import fishOrderRouter from './routes/fishOrder.route.js';
+import invoiceRouter from './routes/invoice.route.js';
 
 import {
   securityHeaders,
@@ -136,6 +137,7 @@ app.use('/api/user', userRouter);
 app.use('/api/cart', cartRouter);
 app.use('/api/order', orderRouter);
 app.use('/api/payment', paymentRouter);
+app.use('/api/invoice', invoiceRouter);
 
 const corsErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
   if (err.message && err.message.includes('CORS')) {

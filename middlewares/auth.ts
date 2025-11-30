@@ -51,6 +51,42 @@ export const authenticate = async (
   }
 };
 
+// Optional authentication - doesn't fail if no token, but sets user if token is valid
+export const optionalAuthenticate = async (
+  req: AuthRequest,
+  _res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const token =
+      req.cookies?.accessToken ||
+      (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')
+        ? req.headers.authorization.split(' ')[1]
+        : null);
+
+    if (!token) {
+      // No token, continue without user
+      next();
+      return;
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as JWTPayload;
+
+    const user = await User.findById(decoded.userId || (decoded as any).id)
+      .select('-password')
+      .lean();
+
+    if (user) {
+      req.user = user as IUser;
+    }
+    
+    next();
+  } catch (error: any) {
+    // Invalid token, continue without user
+    next();
+  }
+};
+
 export const isAdmin = async (
   req: AuthRequest,
   res: Response,
