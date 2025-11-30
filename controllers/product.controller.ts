@@ -1258,14 +1258,23 @@ export const getRelatedProducts = async (req: AuthRequest, res: Response): Promi
 
     const query = mongoose.Types.ObjectId.isValid(id) ? { _id: id } : { slug: id };
 
-    const currentProduct = await Product.findOne(query).select('category tags _id');
+    // Check both Product and FishProduct models
+    let currentProduct: any = await Product.findOne(query).select('category tags _id').lean();
+    let isFishProduct = false;
 
     if (!currentProduct) {
-      res.status(404).json({
-        message: 'Product not found',
-        success: false,
-      });
-      return;
+      // Check FishProduct model
+      const fishProduct = await FishProduct.findOne(query).select('category tags _id').lean();
+      if (fishProduct) {
+        currentProduct = fishProduct;
+        isFishProduct = true;
+      } else {
+        res.status(404).json({
+          message: 'Product not found',
+          success: false,
+        });
+        return;
+      }
     }
 
     const relatedQuery: any = {
@@ -1277,12 +1286,54 @@ export const getRelatedProducts = async (req: AuthRequest, res: Response): Promi
       relatedQuery.category = (currentProduct as any).category;
     }
 
-    let relatedProducts = await Product.find(relatedQuery)
-      .populate('category', 'name slug')
-      .select('name price image category stock status slug shortDescription')
-      .limit(limit * 2)
-      .lean();
+    let relatedProducts: any[] = [];
 
+    if (isFishProduct) {
+      // Search for related products in FishProduct model
+      relatedProducts = await FishProduct.find(relatedQuery)
+        .populate('category', 'name slug')
+        .select('name image category status slug shortDescription sizeCategories')
+        .limit(limit * 2)
+        .lean();
+
+      // Convert fish products to regular product format
+      relatedProducts = relatedProducts.map((fp: any) => {
+        const defaultSizeCat = fp.sizeCategories.find((sc: any) => sc.isDefault) || fp.sizeCategories[0];
+        const totalStock = fp.sizeCategories.reduce((sum: number, sc: any) => sum + (sc.stock || 0), 0);
+        const minPrice = Math.min(...fp.sizeCategories.map((sc: any) => sc.pricePerKg));
+        const maxPrice = Math.max(...fp.sizeCategories.map((sc: any) => sc.pricePerKg));
+
+        return {
+          ...fp,
+          _id: fp._id,
+          price: defaultSizeCat?.pricePerKg || minPrice,
+          stock: totalStock,
+          images: fp.image ? [fp.image] : [],
+          hasVariants: fp.sizeCategories.length > 1,
+          variants: fp.sizeCategories.map((sc: any) => ({
+            _id: sc._id,
+            label: sc.label,
+            price: sc.pricePerKg,
+            stock: sc.stock || 0,
+            measurement: 1,
+            unit: 'kg',
+            status: sc.status,
+            isDefault: sc.isDefault,
+          })),
+          priceRange: { min: minPrice, max: maxPrice },
+          isFishProduct: true,
+        };
+      });
+    } else {
+      // Search for related products in Product model
+      relatedProducts = await Product.find(relatedQuery)
+        .populate('category', 'name slug')
+        .select('name price image category stock status slug shortDescription')
+        .limit(limit * 2)
+        .lean();
+    }
+
+    // Sort by tags if available
     if ((currentProduct as any).tags && (currentProduct as any).tags.length > 0) {
       const taggedProducts = relatedProducts.filter(
         (p: any) =>
@@ -1297,7 +1348,8 @@ export const getRelatedProducts = async (req: AuthRequest, res: Response): Promi
 
     relatedProducts = relatedProducts.slice(0, limit);
 
-    if (relatedProducts.length < limit) {
+    // If we need more products and it's a regular product, try to get more from regular products
+    if (relatedProducts.length < limit && !isFishProduct) {
       const additionalProducts = await Product.find({
         _id: {
           $nin: [
@@ -1314,6 +1366,55 @@ export const getRelatedProducts = async (req: AuthRequest, res: Response): Promi
         .lean();
 
       relatedProducts = [...relatedProducts, ...additionalProducts];
+    }
+
+    // If we need more products and it's a fish product, try to get more from fish products
+    if (relatedProducts.length < limit && isFishProduct) {
+      const additionalProducts = await FishProduct.find({
+        _id: {
+          $nin: [
+            ...relatedProducts.map((p: any) => p._id),
+            (currentProduct as any)._id,
+          ],
+        },
+        status: 'active',
+      })
+        .populate('category', 'name slug')
+        .select('name image category status slug shortDescription sizeCategories')
+        .sort({ views: -1 })
+        .limit(limit - relatedProducts.length)
+        .lean();
+
+      // Convert additional fish products
+      const convertedAdditional = additionalProducts.map((fp: any) => {
+        const defaultSizeCat = fp.sizeCategories.find((sc: any) => sc.isDefault) || fp.sizeCategories[0];
+        const totalStock = fp.sizeCategories.reduce((sum: number, sc: any) => sum + (sc.stock || 0), 0);
+        const minPrice = Math.min(...fp.sizeCategories.map((sc: any) => sc.pricePerKg));
+        const maxPrice = Math.max(...fp.sizeCategories.map((sc: any) => sc.pricePerKg));
+
+        return {
+          ...fp,
+          _id: fp._id,
+          price: defaultSizeCat?.pricePerKg || minPrice,
+          stock: totalStock,
+          images: fp.image ? [fp.image] : [],
+          hasVariants: fp.sizeCategories.length > 1,
+          variants: fp.sizeCategories.map((sc: any) => ({
+            _id: sc._id,
+            label: sc.label,
+            price: sc.pricePerKg,
+            stock: sc.stock || 0,
+            measurement: 1,
+            unit: 'kg',
+            status: sc.status,
+            isDefault: sc.isDefault,
+          })),
+          priceRange: { min: minPrice, max: maxPrice },
+          isFishProduct: true,
+        };
+      });
+
+      relatedProducts = [...relatedProducts, ...convertedAdditional];
     }
 
     logPerformance('getRelatedProducts', Date.now() - startTime, {
