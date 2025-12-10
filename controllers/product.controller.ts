@@ -6,6 +6,7 @@ import mongoose from 'mongoose';
 import ImageKit from 'imagekit';
 import logger, { logPerformance } from '../services/logger.js';
 import { AuthRequest } from '../types/index.js';
+import cacheService from '../services/cache.js';
 
 let imagekit: ImageKit | null = null;
 
@@ -371,6 +372,11 @@ export const createProduct = async (req: AuthRequest, res: Response): Promise<vo
 
     logger.info(`Product created: ${(newProduct as any).name} (ID: ${(newProduct as any)._id})`);
 
+    // Invalidate product list caches when new product is created
+    await cacheService.delPattern('products:*');
+    await cacheService.del(cacheService.keys.FEATURED_PRODUCTS());
+    await cacheService.del(cacheService.keys.POPULAR_PRODUCTS());
+
     res.status(201).json({
       message: 'Product created successfully',
       product: newProduct,
@@ -399,6 +405,20 @@ export const getAllProducts = async (req: AuthRequest, res: Response): Promise<v
       sort = 'createdAt',
       order = 'desc',
     } = req.query;
+
+    // Generate cache key based on query parameters
+    const cacheKey = cacheService.keys.PRODUCTS(
+      `page:${page}:limit:${limit}:cat:${category || 'all'}:search:${search || ''}:sort:${sort}:order:${order}`
+    );
+
+    // Try to get from cache first
+    // NOTE: Stock values in cache are for DISPLAY ONLY - actual inventory checks MUST always query database
+    const cached = await cacheService.get(cacheKey);
+    if (cached) {
+      logPerformance('getAllProducts', Date.now() - startTime, { source: 'cache' });
+      res.status(200).json(cached);
+      return;
+    }
 
     // Find "মাছ" category
     const fishCategory = await Category.findOne({ name: 'মাছ' });
@@ -552,13 +572,19 @@ export const getAllProducts = async (req: AuthRequest, res: Response): Promise<v
       hasPrev: parseInt(page as string) > 1,
     };
 
+    const result = { products, pagination, success: true };
+
+    // Cache the result for 5 minutes (300 seconds)
+    // Note: Stock values in cache are for display only - actual inventory checks must always query database
+    await cacheService.set(cacheKey, result, 300);
+
     logPerformance('getAllProducts', Date.now() - startTime, {
       source: 'database',
       count: products.length,
       optimization: 'aggregation_pipeline',
     });
 
-    res.status(200).json({ products, pagination, success: true });
+    res.status(200).json(result);
   } catch (error: any) {
     logger.error('Error fetching products:', error);
     res.status(500).json({
@@ -649,6 +675,18 @@ export const getProductById = async (req: AuthRequest, res: Response): Promise<v
       return;
     }
 
+    // Generate cache key
+    const cacheKey = cacheService.keys.PRODUCT(id);
+
+    // Try to get from cache first
+    // NOTE: Stock values in cache are for DISPLAY ONLY - actual inventory checks MUST always query database
+    const cached = await cacheService.get(cacheKey);
+    if (cached) {
+      logPerformance('getProductById', Date.now() - startTime, { source: 'cache', productId: id });
+      res.status(200).json(cached);
+      return;
+    }
+
     const isObjectId = mongoose.Types.ObjectId.isValid(id);
     const query = isObjectId ? { _id: id } : { slug: id };
 
@@ -710,12 +748,18 @@ export const getProductById = async (req: AuthRequest, res: Response): Promise<v
       $set: { lastViewedAt: new Date() },
     }).catch((err) => logger.error('Error incrementing product views:', err));
 
+    const result = { product, success: true };
+
+    // Cache the result for 5 minutes (300 seconds)
+    // Note: Stock values in cache are for display only - actual inventory checks must always query database
+    await cacheService.set(cacheKey, result, 300);
+
     logPerformance('getProductById', Date.now() - startTime, {
       source: 'database',
       productId: (product as any)._id,
     });
 
-    res.status(200).json({ product, success: true });
+    res.status(200).json(result);
   } catch (error: any) {
     logger.error('Error fetching product:', error);
 
@@ -899,6 +943,12 @@ export const updateProduct = async (req: AuthRequest, res: Response): Promise<vo
 
     console.log('Updated product:', updatedProduct);
 
+    // Invalidate all product-related caches to prevent stale data
+    await cacheService.del(cacheService.keys.PRODUCT(req.params.id));
+    await cacheService.delPattern('products:*');
+    await cacheService.del(cacheService.keys.FEATURED_PRODUCTS());
+    await cacheService.del(cacheService.keys.POPULAR_PRODUCTS());
+
     res.status(200).json({
       message: 'Product updated successfully',
       product: updatedProduct,
@@ -930,6 +980,12 @@ export const deleteProduct = async (req: AuthRequest, res: Response): Promise<vo
       res.status(404).json({ message: 'Product not found', success: false });
       return;
     }
+
+    // Invalidate all product-related caches
+    await cacheService.del(cacheService.keys.PRODUCT(req.params.id));
+    await cacheService.delPattern('products:*');
+    await cacheService.del(cacheService.keys.FEATURED_PRODUCTS());
+    await cacheService.del(cacheService.keys.POPULAR_PRODUCTS());
 
     res.status(200).json({
       message: 'Product deleted successfully',

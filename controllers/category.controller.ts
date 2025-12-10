@@ -3,6 +3,7 @@ import Category from '../models/category.model.js';
 import ImageKit from 'imagekit';
 import { generateSlug } from '../utils/slugGenerator.js';
 import { AuthRequest } from '../types/index.js';
+import cacheService from '../services/cache.js';
 
 let imagekit: ImageKit | null = null;
 
@@ -85,6 +86,10 @@ export const createCategory = async (req: AuthRequest, res: Response): Promise<v
       cloudinary_id: imagekit_id,
     });
 
+    // Invalidate category caches
+    await cacheService.del(cacheService.keys.CATEGORIES());
+    await cacheService.delPattern('categories:*');
+
     res.status(201).json({
       message: 'Category created successfully',
       success: true,
@@ -101,12 +106,25 @@ export const createCategory = async (req: AuthRequest, res: Response): Promise<v
 
 export const getCategories = async (_req: AuthRequest, res: Response): Promise<void> => {
   try {
+    // Try to get from cache first
+    const cacheKey = cacheService.keys.CATEGORIES();
+    const cached = await cacheService.get(cacheKey);
+    if (cached) {
+      res.status(200).json(cached);
+      return;
+    }
+
     const categories = await Category.find()
       .select('-__v -cloudinary_id')
       .lean()
       .sort({ createdAt: -1 });
 
-    res.status(200).json({ success: true, categories });
+    const result = { success: true, categories };
+
+    // Cache for 10 minutes (600 seconds) - categories change infrequently
+    await cacheService.set(cacheKey, result, 600);
+
+    res.status(200).json(result);
   } catch (error: any) {
     res.status(500).json({
       message: 'Error fetching categories',
@@ -118,6 +136,14 @@ export const getCategories = async (_req: AuthRequest, res: Response): Promise<v
 
 export const getCategoryById = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    // Try to get from cache first
+    const cacheKey = cacheService.keys.CATEGORY(req.params.id);
+    const cached = await cacheService.get(cacheKey);
+    if (cached) {
+      res.status(200).json(cached);
+      return;
+    }
+
     const category = await Category.findById(req.params.id).select('-__v').lean();
 
     if (!category) {
@@ -128,7 +154,12 @@ export const getCategoryById = async (req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    res.status(200).json({ success: true, category });
+    const result = { success: true, category };
+
+    // Cache for 10 minutes (600 seconds)
+    await cacheService.set(cacheKey, result, 600);
+
+    res.status(200).json(result);
   } catch (error: any) {
     res.status(500).json({
       message: 'Error fetching category',
@@ -201,6 +232,11 @@ export const updateCategory = async (req: AuthRequest, res: Response): Promise<v
 
     const updated = await Category.findByIdAndUpdate(req.params.id, updateData, { new: true });
 
+    // Invalidate category caches
+    await cacheService.del(cacheService.keys.CATEGORY(req.params.id));
+    await cacheService.del(cacheService.keys.CATEGORIES());
+    await cacheService.delPattern('categories:*');
+
     res.status(200).json({ success: true, category: updated });
   } catch (error: any) {
     res.status(500).json({
@@ -221,6 +257,11 @@ export const deleteCategory = async (req: AuthRequest, res: Response): Promise<v
     }
 
     await Category.findByIdAndDelete(req.params.id);
+
+    // Invalidate category caches
+    await cacheService.del(cacheService.keys.CATEGORY(req.params.id));
+    await cacheService.del(cacheService.keys.CATEGORIES());
+    await cacheService.delPattern('categories:*');
 
     res.status(200).json({
       message: 'Category deleted successfully',

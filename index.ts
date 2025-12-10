@@ -192,12 +192,21 @@ app.use('*', (_req: Request, res: Response) => {
 
 connectDB()
   .then(() => {
-    app.listen(PORT, () => {
+    app.listen(PORT, async () => {
       logger.info(`🚀 Server is running on port ${PORT}`);
       logger.info(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
       logger.info(
         `📊 Cache service: ${cacheService.isRedisAvailable() ? 'ready' : 'disabled (Redis unavailable)'}`
       );
+
+      // Warm cache on startup if Redis is available
+      if (cacheService.isRedisAvailable()) {
+        try {
+          await cacheService.warmCache();
+        } catch (error: any) {
+          logger.warn('Cache warming failed:', error.message);
+        }
+      }
     });
   })
   .catch((error) => {

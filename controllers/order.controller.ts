@@ -22,6 +22,7 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
     paymentMethod = 'Cash on Delivery',
     totalPrice,
     guestInfo,
+    shippingZone,
   } = req.body;
 
   if (!orderItems || orderItems.length === 0) {
@@ -46,6 +47,33 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
       message: 'Address must be at least 2 characters',
     });
     return;
+  }
+
+  // Validate address fields based on zone
+  // If shippingZone is provided and is "inside_dhaka", division/district/upazila are optional
+  // If shippingZone is "outside_dhaka" or not provided, validate required fields
+  if (shippingZone === 'outside_dhaka') {
+    if (!shippingAddress.division || shippingAddress.division.trim().length < 2) {
+      res.status(400).json({
+        success: false,
+        message: 'Division is required for outside Dhaka delivery',
+      });
+      return;
+    }
+    if (!shippingAddress.district || shippingAddress.district.trim().length < 2) {
+      res.status(400).json({
+        success: false,
+        message: 'District is required for outside Dhaka delivery',
+      });
+      return;
+    }
+    if (!shippingAddress.upazila || shippingAddress.upazila.trim().length < 2) {
+      res.status(400).json({
+        success: false,
+        message: 'Upazila/Thana is required for outside Dhaka delivery',
+      });
+      return;
+    }
   }
 
   if (totalPrice === undefined || totalPrice === null || isNaN(totalPrice) || totalPrice <= 0) {
@@ -218,7 +246,10 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
           throw new Error('Price mismatch detected');
         }
 
-        const zone = getShippingZone(shippingAddress);
+        // Use provided shippingZone if available, otherwise calculate from address
+        const zone = shippingZone && (shippingZone === 'inside_dhaka' || shippingZone === 'outside_dhaka')
+          ? shippingZone
+          : getShippingZone(shippingAddress);
         const shippingResult = calculateOtherProductShipping(zone, totalWeightKg);
         const grandTotal = calculatedTotal + shippingResult.shippingFee;
 
