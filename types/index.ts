@@ -163,6 +163,7 @@ export interface IShippingAddress {
 
 // Order Interface
 export interface IOrder extends Document {
+  idempotencyKey?: string;
   _id: Types.ObjectId;
   user?: Types.ObjectId | IUser;
   guestInfo?: {

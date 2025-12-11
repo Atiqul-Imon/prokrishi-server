@@ -24,6 +24,9 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
     guestInfo,
     shippingZone,
   } = req.body;
+  const idempotencyKey =
+    (req.headers['idempotency-key'] as string | undefined) ||
+    (typeof req.body.idempotencyKey === 'string' ? req.body.idempotencyKey : undefined);
 
   if (!orderItems || orderItems.length === 0) {
     res.status(400).json({
@@ -97,6 +100,20 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
   }
 
   try {
+    // Idempotency: if key provided and order already exists, return it
+    if (idempotencyKey) {
+      const existing = await Order.findOne({ idempotencyKey }).populate('user', 'name email phone');
+      if (existing) {
+        res.status(200).json({
+          success: true,
+          message: 'Order already created for this idempotency key',
+          order: existing,
+          idempotencyKey,
+        });
+        return;
+      }
+    }
+
     const session = await mongoose.startSession();
 
     try {
@@ -270,6 +287,7 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
           status: 'pending',
           paymentStatus: 'pending',
           isGuestOrder: isGuestOrder,
+          ...(idempotencyKey && { idempotencyKey }),
         };
 
         if (isGuestOrder) {
@@ -673,6 +691,131 @@ export const getShippingQuote = async (req: AuthRequest, res: Response): Promise
       success: false,
       message: error.message || 'Failed to calculate shipping',
     });
+  }
+};
+
+// Validate cart (stock + price) without creating order
+export const validateCart = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { orderItems } = req.body;
+    if (!orderItems || !Array.isArray(orderItems) || orderItems.length === 0) {
+      res.status(400).json({ success: false, message: 'No order items provided', error: true });
+      return;
+    }
+
+    const validated: any[] = [];
+    let totalPrice = 0;
+    let totalWeightKg = 0;
+    let hasChanges = false;
+
+    for (const item of orderItems) {
+      const product = await Product.findById(item.product);
+      if (!product || (product as any).status !== 'active') {
+        validated.push({
+          product: item.product,
+          name: item.name,
+          available: false,
+          reason: 'Product unavailable',
+        });
+        hasChanges = true;
+        continue;
+      }
+
+      const variantIdFromRequest =
+        item.variantId ||
+        item.variant?._id ||
+        item.variant?.variantId ||
+        item.variantId;
+
+      let unitPrice = item.price;
+      let availableQty = (product as any).stock ?? 0;
+      let variantSnapshot: any = null;
+
+      if ((product as any).hasVariants && (product as any).variants?.length) {
+        const variants = (product as any).variants;
+        const matchedVariant = variantIdFromRequest
+          ? variants.id?.(variantIdFromRequest) ||
+            variants.find((variant: any) => variant._id.equals(variantIdFromRequest))
+          : variants.find((variant: any) => variant.isDefault);
+
+        if (!matchedVariant || matchedVariant.status === 'inactive') {
+          validated.push({
+            product: (product as any)._id,
+            variantId: variantIdFromRequest,
+            name: item.name || (product as any).name,
+            available: false,
+            reason: 'Variant unavailable',
+          });
+          hasChanges = true;
+          continue;
+        }
+
+        availableQty = matchedVariant.stock ?? 0;
+        unitPrice = matchedVariant.salePrice || matchedVariant.price;
+        variantSnapshot = {
+          variantId: matchedVariant._id,
+          label: matchedVariant.label,
+          sku: matchedVariant.sku,
+          price: matchedVariant.price,
+          salePrice: matchedVariant.salePrice,
+          measurement: matchedVariant.measurement,
+          unit: matchedVariant.unit,
+          image: matchedVariant.image || (product as any).image,
+          unitWeightKg: matchedVariant.unitWeightKg,
+        };
+      } else {
+        unitPrice = (product as any).price;
+      }
+
+      const requestedQty = Number(item.quantity) || 0;
+      if (requestedQty <= 0) {
+        validated.push({
+          product: (product as any)._id,
+          variantId: variantIdFromRequest,
+          name: item.name || (product as any).name,
+          available: false,
+          reason: 'Invalid quantity',
+        });
+        hasChanges = true;
+        continue;
+      }
+
+      const finalQty = Math.min(requestedQty, availableQty);
+      if (finalQty !== requestedQty) hasChanges = true;
+
+      const lineTotal = unitPrice * finalQty;
+      totalPrice += lineTotal;
+
+      const itemWeight = calculateItemWeightKg({
+        product: product as unknown as any,
+        variant: variantSnapshot,
+        quantity: finalQty,
+      });
+      totalWeightKg += itemWeight;
+
+      validated.push({
+        product: (product as any)._id,
+        variantId: variantIdFromRequest,
+        name: item.name || (product as any).name,
+        requestedQty,
+        finalQty,
+        available: finalQty > 0,
+        price: unitPrice,
+        lineTotal,
+        variant: variantSnapshot,
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      items: validated,
+      totalPrice,
+      totalWeightKg,
+      hasChanges,
+    });
+  } catch (error: any) {
+    logger.error('Error validating cart:', error);
+    res.status(500).json({ success: false, message: 'Failed to validate cart', error: error.message });
   }
 };
 

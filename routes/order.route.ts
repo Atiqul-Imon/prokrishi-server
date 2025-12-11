@@ -8,12 +8,14 @@ import {
   cancelOrder,
   getOrderStats,
   getShippingQuote,
+  validateCart,
 } from '../controllers/order.controller.js';
 import { authenticate, authorizeAdmin } from '../middlewares/auth.js';
 
 const router: Router = express.Router();
 
 router.route('/create').post(createOrder);
+router.route('/validate').post(validateCart);
 router.route('/shipping-quote').post(getShippingQuote);
 router.route('/user').get(authenticate, getUserOrders);
 router.route('/stats').get(authenticate, authorizeAdmin, getOrderStats);
