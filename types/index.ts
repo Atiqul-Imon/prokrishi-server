@@ -43,6 +43,9 @@ export interface IProductVariant {
   stock: number;
   measurement?: number;
   unit?: string;
+  priceType?: 'PER_UNIT' | 'PER_WEIGHT';
+  stockType?: 'COUNT' | 'WEIGHT';
+  measurementIncrement?: number;
   unitWeightKg?: number;
   status: 'active' | 'inactive' | 'out_of_stock';
   isDefault?: boolean;
@@ -79,6 +82,8 @@ export interface IProduct extends Document {
   unit: string;
   measurement?: number;
   measurementIncrement?: number;
+  priceType?: 'PER_UNIT' | 'PER_WEIGHT';
+  stockType?: 'COUNT' | 'WEIGHT';
   unitWeightKg?: number;
   specifications?: Record<string, string>;
   views: number;

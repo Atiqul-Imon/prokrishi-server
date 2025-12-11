@@ -39,6 +39,21 @@ const productVariantSchema = new Schema(
       type: String,
       enum: ['pcs', 'kg', 'g', 'l', 'ml'],
     },
+    priceType: {
+      type: String,
+      enum: ['PER_UNIT', 'PER_WEIGHT'],
+      default: 'PER_UNIT',
+    },
+    stockType: {
+      type: String,
+      enum: ['COUNT', 'WEIGHT'],
+      default: 'COUNT',
+    },
+    measurementIncrement: {
+      type: Number,
+      min: 0.01,
+      default: 0.01,
+    },
     unitWeightKg: {
       type: Number,
       min: 0,
@@ -107,6 +122,16 @@ const productSchema = new Schema<IProduct>(
       type: Number,
       default: 0.01,
       min: 0.01,
+    },
+    priceType: {
+      type: String,
+      enum: ['PER_UNIT', 'PER_WEIGHT'],
+      default: 'PER_UNIT',
+    },
+    stockType: {
+      type: String,
+      enum: ['COUNT', 'WEIGHT'],
+      default: 'COUNT',
     },
     stock: {
       type: Number,

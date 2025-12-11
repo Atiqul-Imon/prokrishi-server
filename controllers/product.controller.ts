@@ -126,6 +126,16 @@ const normalizeVariants = (
     const measurement =
       variant?.measurement !== undefined ? Number(variant.measurement) : fallback.measurement ?? 1;
     const unit = variant?.unit || fallback.unit || 'pcs';
+    const measurementIncrementRaw =
+      variant?.measurementIncrement !== undefined ? Number(variant.measurementIncrement) : undefined;
+    const measurementIncrement =
+      !Number.isNaN(measurementIncrementRaw) && measurementIncrementRaw !== undefined
+        ? measurementIncrementRaw
+        : unit === 'pcs'
+          ? 1
+          : 0.01;
+    const priceType = unit === 'pcs' ? 'PER_UNIT' : 'PER_WEIGHT';
+    const stockType = unit === 'pcs' ? 'COUNT' : 'WEIGHT';
 
     if (!label) {
       throw new Error('Variant label is required');
@@ -142,6 +152,9 @@ const normalizeVariants = (
     if (Number.isNaN(measurement) || measurement <= 0) {
       throw new Error(`Invalid measurement for variant ${label}`);
     }
+    if (Number.isNaN(measurementIncrement) || measurementIncrement <= 0) {
+      throw new Error(`Invalid measurement increment for variant ${label}`);
+    }
 
     return {
       label,
@@ -152,6 +165,9 @@ const normalizeVariants = (
       stock,
       measurement,
       unit,
+      priceType,
+      stockType,
+      measurementIncrement,
       unitWeightKg:
         variant?.unitWeightKg !== undefined && variant?.unitWeightKg !== null
           ? Number(variant.unitWeightKg)
@@ -356,7 +372,9 @@ export const createProduct = async (req: AuthRequest, res: Response): Promise<vo
         unitWeightKg !== undefined
           ? Number(unitWeightKg)
           : defaultVariant.unitWeightKg ?? undefined,
-      measurementIncrement: measurementIncrement ?? 0.01,
+      measurementIncrement: defaultVariant.measurementIncrement ?? measurementIncrement ?? 0.01,
+      priceType: defaultVariant.priceType || (defaultVariant.unit === 'pcs' ? 'PER_UNIT' : 'PER_WEIGHT'),
+      stockType: defaultVariant.stockType || (defaultVariant.unit === 'pcs' ? 'COUNT' : 'WEIGHT'),
       lowStockThreshold: lowStockThreshold ?? 5,
       status,
       description,
@@ -822,7 +840,9 @@ export const updateProduct = async (req: AuthRequest, res: Response): Promise<vo
         unitWeightKg !== undefined ? Number(unitWeightKg) : undefined,
       lowStockThreshold,
       isFeatured,
-      measurementIncrement,
+    measurementIncrement,
+    priceType: req.body.priceType,
+    stockType: req.body.stockType,
       shortDescription,
       metaTitle,
       metaDescription,
@@ -926,6 +946,12 @@ export const updateProduct = async (req: AuthRequest, res: Response): Promise<vo
       updateData.stock = aggregateStock;
       updateData.measurement = defaultVariant.measurement ?? 1;
       updateData.unit = defaultVariant.unit ?? 'pcs';
+      updateData.measurementIncrement =
+        defaultVariant.measurementIncrement ?? measurementIncrement ?? updateData.measurementIncrement;
+      updateData.priceType =
+        defaultVariant.priceType || (defaultVariant.unit === 'pcs' ? 'PER_UNIT' : 'PER_WEIGHT');
+      updateData.stockType =
+        defaultVariant.stockType || (defaultVariant.unit === 'pcs' ? 'COUNT' : 'WEIGHT');
     } else if (existingProduct.hasVariants) {
       // Keep hasVariants true if product already has variants and they weren't updated
       updateData.hasVariants = true;
@@ -1040,6 +1066,9 @@ export const getFeaturedProducts = async (_req: AuthRequest, res: Response): Pro
           stock: sc.stock || 0,
           measurement: 1,
           unit: 'kg',
+          priceType: 'PER_WEIGHT',
+          stockType: 'WEIGHT',
+          measurementIncrement: 0.25,
           status: sc.status,
           isDefault: sc.isDefault,
         })),
@@ -1105,6 +1134,9 @@ export const getPopularProducts = async (_req: AuthRequest, res: Response): Prom
           stock: sc.stock || 0,
           measurement: 1,
           unit: 'kg',
+          priceType: 'PER_WEIGHT',
+          stockType: 'WEIGHT',
+          measurementIncrement: 0.25,
           status: sc.status,
           isDefault: sc.isDefault,
         })),
