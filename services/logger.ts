@@ -61,6 +61,7 @@ export const logRequest = (req: Request, res: Response, responseTime: number): v
     ip: req.ip,
     userAgent: req.get('User-Agent'),
     userId: (req as AuthRequest).user?._id?.toString() || 'anonymous',
+    requestId: (req as any).id,
   };
 
   if (res.statusCode >= 400) {
@@ -78,6 +79,7 @@ export const logError = (error: Error, req: Request | null = null): void => {
     method: req?.method,
     ip: req?.ip,
     userId: (req as AuthRequest)?.user?._id?.toString(),
+    requestId: req ? (req as any).id : undefined,
     timestamp: new Date().toISOString(),
   };
 

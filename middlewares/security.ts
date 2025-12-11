@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import rateLimit, { RateLimitRequestHandler } from 'express-rate-limit';
 import helmet from 'helmet';
 import { validationResult } from 'express-validator';
@@ -160,6 +161,7 @@ export const requestLogger = (req: Request, res: Response, next: NextFunction): 
       duration: `${duration}ms`,
       ip: req.ip || req.socket.remoteAddress,
       userAgent: req.get('user-agent'),
+      requestId: (req as any).id,
     };
 
     if (res.statusCode >= 400) {
@@ -169,6 +171,14 @@ export const requestLogger = (req: Request, res: Response, next: NextFunction): 
     }
   });
 
+  next();
+};
+
+export const assignRequestId = (req: Request, res: Response, next: NextFunction): void => {
+  const existingId = (req as any).id || req.headers['x-request-id'];
+  const requestId = typeof existingId === 'string' && existingId.trim().length > 0 ? existingId : crypto.randomUUID();
+  (req as any).id = requestId;
+  res.setHeader('X-Request-Id', requestId);
   next();
 };
 

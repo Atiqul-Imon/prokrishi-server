@@ -26,6 +26,7 @@ import {
   profileRateLimit,
   sanitizeInput,
   requestLogger,
+  assignRequestId,
 } from './middlewares/security.js';
 import logger, { logError } from './services/logger.js';
 import cacheService from './services/cache.js';
@@ -90,6 +91,7 @@ app.use(
   })
 );
 
+app.use(assignRequestId);
 app.use(requestLogger);
 
 app.use(
