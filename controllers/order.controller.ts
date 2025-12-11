@@ -242,8 +242,12 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
           calculatedTotal += itemTotal;
         }
 
-        if (Math.abs(calculatedTotal - totalPrice) > 0.01) {
-          throw new Error('Price mismatch detected');
+        // Server-authoritative pricing: ignore client total if it differs
+        if (totalPrice !== undefined && Math.abs(calculatedTotal - Number(totalPrice)) > 0.01) {
+          logger.warn('Price mismatch detected; using server-calculated total', {
+            clientTotal: totalPrice,
+            serverTotal: calculatedTotal,
+          });
         }
 
         // Use provided shippingZone if available, otherwise calculate from address
