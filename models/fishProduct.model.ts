@@ -7,6 +7,8 @@ export interface IFishSizeCategory {
   minWeight?: number; // Optional minimum weight for this size category
   maxWeight?: number; // Optional maximum weight for this size category
   sku?: string; // Optional SKU for this size category
+  measurementIncrement?: number; // Minimum sellable increment in kg (e.g., 0.25)
+  stockType?: 'WEIGHT' | 'COUNT';
   status: 'active' | 'inactive' | 'out_of_stock';
   isDefault?: boolean;
 }
@@ -57,6 +59,16 @@ const fishSizeCategorySchema = new Schema<IFishSizeCategory>(
     maxWeight: {
       type: Number,
       min: 0,
+    },
+    measurementIncrement: {
+      type: Number,
+      min: 0.01,
+      default: 0.25,
+    },
+    stockType: {
+      type: String,
+      enum: ['WEIGHT', 'COUNT'],
+      default: 'WEIGHT',
     },
     sku: {
       type: String,

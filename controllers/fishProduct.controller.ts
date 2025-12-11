@@ -121,6 +121,11 @@ export const getAllFishProducts = async (req: AuthRequest, res: Response): Promi
         ...product,
         availableStock: totalStock,
         priceRange: { min: minPrice, max: maxPrice },
+        sizeCategories: product.sizeCategories.map((cat: any) => ({
+          ...cat,
+          measurementIncrement: cat.measurementIncrement || 0.25,
+          stockType: cat.stockType || 'WEIGHT',
+        })),
       };
     });
 
@@ -299,6 +304,13 @@ export const createFishProduct = async (req: AuthRequest, res: Response): Promis
       minWeight: cat.minWeight ? Number(cat.minWeight) : undefined,
       maxWeight: cat.maxWeight ? Number(cat.maxWeight) : undefined,
       sku: cat.sku?.trim() || undefined,
+      measurementIncrement:
+        cat.measurementIncrement !== undefined
+          ? Number(cat.measurementIncrement)
+          : cat.minWeight
+          ? Number(cat.minWeight)
+          : 0.25,
+      stockType: 'WEIGHT',
       status: cat.status || 'active',
       isDefault: index === 0,
     }));
@@ -452,6 +464,13 @@ export const updateFishProduct = async (req: AuthRequest, res: Response): Promis
           });
           return;
         }
+        if (sizeCat.measurementIncrement !== undefined && Number(sizeCat.measurementIncrement) <= 0) {
+          res.status(400).json({
+            success: false,
+            message: 'Measurement increment must be greater than 0',
+          });
+          return;
+        }
       }
 
       // Normalize size categories
@@ -469,6 +488,15 @@ export const updateFishProduct = async (req: AuthRequest, res: Response): Promis
           minWeight: cat.minWeight ? Number(cat.minWeight) : undefined,
           maxWeight: cat.maxWeight ? Number(cat.maxWeight) : undefined,
           sku: cat.sku?.trim() || undefined,
+          measurementIncrement:
+            cat.measurementIncrement !== undefined
+              ? Number(cat.measurementIncrement)
+              : existingCat?.measurementIncrement !== undefined
+              ? existingCat.measurementIncrement
+              : cat.minWeight
+              ? Number(cat.minWeight)
+              : 0.25,
+          stockType: 'WEIGHT',
           status: cat.status || 'active',
           isDefault: index === 0 || cat.isDefault || false,
         };
